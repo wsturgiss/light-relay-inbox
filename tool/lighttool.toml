@@ -1,0 +1,9 @@
+[tool]
+id = "com.thelightphone.relayinbox"
+label = "Relay Inbox"
+versionCode = 1
+versionName = "0.1.0"
+permissions = ["android.permission.INTERNET"]
+capabilities = []
+# Real LP3 hardware. For the SDK emulator use "com.thelightphone.sdk.emulator".
+serverPackage = "com.lightos"
