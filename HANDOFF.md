@@ -65,6 +65,10 @@ adb install -r tool/build/outputs/apk/debug/tool-debug.apk
    - If it stays "waiting for LightOS…", start with the SDK's
      `LightSdkApplication.registerWithLightServer` and the `LightPushDistributor` on the
      LightOS side. Registration goes through `pushEndpointFetcher`.
+   - If LightOS never issues an endpoint, there's no simple fallback. The tool can't
+     poll the relay, because the phone isn't on the tailnet. Polling would need a
+     public, token-protected read path, and the blueprint deliberately gives the inbox
+     no public reads. That's a design decision to make with Will before building anything.
 2. **Pair.** On baconstation:
    - put `PUSH_ENDPOINT` and `PUSH_KEY` in `relay.env`;
    - replace `REPLY_TOKEN` in `inbox.env` with the phone's value;
