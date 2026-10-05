@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -74,15 +75,16 @@ class ConversationScreen(
         val keys by Pairing.keys.collectAsState()
         val conversation = remember(messages) { conversations(messages).firstOrNull { it.id == threadId } }
         val scrollState = rememberScrollState()
-        var scrolledToEnd by remember { mutableStateOf(false) }
+        // Follow the bottom while the layout settles and as messages arrive, until you scroll up.
+        var pinnedToEnd by remember { mutableStateOf(true) }
 
         // Read covers anything that arrives while it's open, too.
         LaunchedEffect(messages) { RelayStore.markThreadRead(threadId) }
         LaunchedEffect(scrollState.maxValue) {
-            if (!scrolledToEnd && scrollState.maxValue > 0) {
-                scrollState.scrollTo(scrollState.maxValue)
-                scrolledToEnd = true
-            }
+            if (pinnedToEnd) scrollState.scrollTo(scrollState.maxValue)
+        }
+        LaunchedEffect(scrollState.value) {
+            pinnedToEnd = scrollState.value >= scrollState.maxValue
         }
 
         val canReply = keys != null && inboxUrl().isNotEmpty()
@@ -95,7 +97,7 @@ class ConversationScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text(conversation?.let { formatTime(it.lastActivity) } ?: ""),
+                    center = LightTopBarCenter.Text(conversation?.messages?.first()?.headline.orEmpty()),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
@@ -104,19 +106,19 @@ class ConversationScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 1f.gridUnitsAsDp()),
+                        .padding(start = 2f.gridUnitsAsDp(), end = 1f.gridUnitsAsDp()),
                 ) {
                     if (conversation == null) {
                         LightText(text = "This conversation is gone.", variant = LightTextVariant.Copy, lighten = true)
                         return@LightScrollView
                     }
-                    conversation.messages.forEachIndexed { index, message ->
-                        if (index > 0) {
-                            Spacer(modifier = Modifier.height(1.5f.gridUnitsAsDp()))
-                            Divider()
-                            Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+                    timeline(conversation).forEach { entry ->
+                        when (entry) {
+                            is Entry.FromAgent -> AgentEntry(entry.message, canReply) { choice ->
+                                viewModel.reply(lightContext, entry.message.id, choice = choice)
+                            }
+                            is Entry.FromYou -> YourEntry(entry.reply)
                         }
-                        MessageBlock(message, canReply) { choice -> viewModel.reply(lightContext, message.id, choice = choice) }
                     }
 
                     if (!canReply) {
@@ -136,7 +138,7 @@ class ConversationScreen(
                         if (conversation != null && canReply) {
                             val latest = conversation.latest
                             add(
-                                LightBarButton.Text(text = "Reply", onClick = {
+                                LightBarButton.LightIcon(icon = LightIcons.COMPOSE_MESSAGE, onClick = {
                                     navigateTo(
                                         screenFactory = { TextEditorScreen(it, EditorRequest(title = "Reply", initialValue = "", initialCaps = true)) },
                                         resultCallback = { text ->
@@ -156,58 +158,67 @@ class ConversationScreen(
     }
 }
 
-@Composable
-private fun MessageBlock(message: RelayMessage, canReply: Boolean, onChoice: (String) -> Unit) {
-    if (message.mine) {
-        // A conversation you started: just what you wrote. Its title is the first line.
-        message.replies.forEach { ReplyLines(it, indent = false) }
-        return
-    }
-    LightText(text = message.headline, variant = LightTextVariant.Heading, modifier = Modifier.fillMaxWidth())
-    if (message.detail.isNotBlank()) {
-        LightText(
-            text = message.detail,
-            variant = LightTextVariant.Copy,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 0.75f.gridUnitsAsDp()),
-        )
-    }
-    LightText(
-        text = formatTime(message.receivedAt),
-        variant = LightTextVariant.Detail,
-        lighten = true,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 0.5f.gridUnitsAsDp()),
-    )
+/** What happened in a conversation, in order: the agent's messages and what you wrote. */
+internal sealed interface Entry {
+    val at: Long
 
-    if (message.needsAnswer) {
-        Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
-        message.choices.forEach { choice ->
-            ActionRow(label = choice, enabled = canReply) { onChoice(choice) }
-        }
+    data class FromAgent(val message: RelayMessage) : Entry {
+        override val at get() = message.receivedAt
     }
 
-    message.replies.forEach { ReplyLines(it, indent = true) }
+    data class FromYou(val reply: Reply) : Entry {
+        override val at get() = reply.at
+    }
 }
 
+internal fun timeline(conversation: Conversation): List<Entry> =
+    conversation.messages
+        .flatMap { m -> (if (m.mine) emptyList() else listOf(Entry.FromAgent(m))) + m.replies.map { Entry.FromYou(it) } }
+        .sortedBy { it.at }
+
+/** Left, like the other side in Messages: the date, then the message, then any choices. */
 @Composable
-private fun ReplyLines(reply: Reply, indent: Boolean) {
-    val start = if (indent) 2f.gridUnitsAsDp() else 0f.gridUnitsAsDp()
-    LightText(
-        text = reply.label(full = true),
-        variant = LightTextVariant.Copy,
+private fun AgentEntry(message: RelayMessage, canReply: Boolean, onChoice: (String) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 1.5f.gridUnitsAsDp())) {
+        LightText(text = formatDateTime(message.receivedAt), variant = LightTextVariant.Detail, modifier = Modifier.fillMaxWidth())
+        LightText(text = message.headline, variant = LightTextVariant.Copy, modifier = Modifier.fillMaxWidth())
+        if (message.detail.isNotBlank()) {
+            LightText(
+                text = message.detail,
+                variant = LightTextVariant.Copy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 0.5f.gridUnitsAsDp()),
+            )
+        }
+        if (message.needsAnswer) {
+            Spacer(modifier = Modifier.height(0.5f.gridUnitsAsDp()))
+            message.choices.forEach { choice ->
+                ActionRow(label = choice, enabled = canReply) { onChoice(choice) }
+            }
+        }
+    }
+}
+
+/** Right, like your side in Messages: the date flush right, the text indented under it. */
+@Composable
+private fun YourEntry(reply: Reply) {
+    val state = when (reply.state) {
+        ReplyState.Pending -> " · sending"
+        ReplyState.Failed -> " · not sent"
+        ReplyState.Sent -> ""
+    }
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 1f.gridUnitsAsDp(), start = start),
-    )
-    LightText(
-        text = formatTime(reply.at),
-        variant = LightTextVariant.Detail,
-        lighten = true,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = start),
-    )
+            .padding(top = 1.5f.gridUnitsAsDp(), start = 2f.gridUnitsAsDp()),
+    ) {
+        LightText(
+            text = formatDateTime(reply.at) + state,
+            variant = LightTextVariant.Detail,
+            align = TextAlign.End,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        LightText(text = reply.choice ?: reply.text.orEmpty(), variant = LightTextVariant.Copy, modifier = Modifier.fillMaxWidth())
+    }
 }

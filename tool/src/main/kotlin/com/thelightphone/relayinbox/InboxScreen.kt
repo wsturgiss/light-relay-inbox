@@ -183,7 +183,8 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
         )
         val summary = when {
             latest !== first -> latest.headline
-            first.mine -> first.replies.lastOrNull()?.text.orEmpty()
+            // What you wrote, unless it's only the title again.
+            first.mine -> first.replies.lastOrNull()?.text.orEmpty().takeIf { it.trim() != first.headline }.orEmpty()
             else -> first.detail
         }
         if (summary.isNotBlank()) {

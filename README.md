@@ -19,9 +19,10 @@ agent. Light's push server accepts pushes, but they don't reach the tool yet; se
   and how many messages it has. `•` marks unread ones, and a conversation with a
   choice still to make says so. **New** starts a conversation: type it, and the first
   line becomes the title.
-- **Conversation:** every message in order, opening on the latest, with your replies
-  under each. A message still waiting on a choice shows its choices. **Reply** answers
-  the latest message. A reply says *sending* or *not sent* until it reaches the relay,
+- **Conversation:** laid out like LightOS Messages, titled with the conversation and
+  opening on the latest: the agent's messages on the left and yours on the right, each
+  under its date, in the order they happened. A message still waiting on a choice shows
+  its choices. The compose button replies to the latest message. A reply says *sending* or *not sent* until it reaches the relay,
   and **Retry** re-queues failures.
 - **Pairing** (the **Pair** button, then the settings icon once paired): push
   registration status, plus the settings the Unraid box needs, as a QR code and as

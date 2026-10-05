@@ -38,6 +38,12 @@ private val weekday = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
 private val date = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
 
 /** "9:40 AM" today, "Mon 9:40 AM" this week, "Sep 3" before that, in the phone's locale. */
+/** "Oct 4 4:47 PM", the way LightOS Messages dates each message. */
+internal fun formatDateTime(epochMillis: Long): String {
+    val at = Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault())
+    return "${date.format(at)} ${timeOfDay.format(at)}"
+}
+
 internal fun formatTime(epochMillis: Long): String {
     val zone = ZoneId.systemDefault()
     val at = Instant.ofEpochMilli(epochMillis).atZone(zone)
@@ -49,9 +55,9 @@ internal fun formatTime(epochMillis: Long): String {
     }
 }
 
-/** "You: Yes", plus how it's going until it has reached the relay. [full] keeps all of typed text. */
-internal fun Reply.label(full: Boolean = false): String {
-    val what = choice ?: if (full) text.orEmpty() else "“${text.orEmpty().take(40)}”"
+/** "You: Yes" for an inbox row, plus how it's going until it has reached the relay. */
+internal fun Reply.label(): String {
+    val what = choice ?: "“${text.orEmpty().take(40)}”"
     return when (state) {
         ReplyState.Pending -> "You: $what · sending"
         ReplyState.Sent -> "You: $what"
