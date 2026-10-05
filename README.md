@@ -1,14 +1,16 @@
 # light-relay-inbox
 
 **Relay Inbox**: the Light Phone III end of the agent relay. Messages from the
-agent arrive as pushes through Light's push server, and wait here as an inbox.
-Replies go back to the reply inbox on the Unraid box. The server side is
+agent are fetched from the reply inbox on the Unraid box (and also arrive as pushes
+through Light's push server, if LightOS gives the tool an endpoint), and wait here
+as an inbox. Replies go back to the same reply inbox. The server side is
 [`light-relay`](../light-relay).
 
 Sibling of `light-agent-inbox` (tool + vendored `sdk/`). Do not hand-edit `sdk/`.
 
-**Status:** builds and its tests pass. It has not yet been run on a phone or against
-Light's real push server.
+**Status:** running on the LP3. Messages arrive by polling, and replies get back to the
+agent. Light's push server accepts pushes, but they don't reach the tool yet; see
+`HANDOFF.md`.
 
 ## What it does
 
@@ -18,17 +20,32 @@ Light's real push server.
 - **Message:** the full text, its choices as tappable rows, and **Reply** for free
   text. Each reply is shown as *sending*, *sent* or *not sent*, and **Retry** re-queues
   failures.
-- **Pairing:** push registration status, plus the three settings the Unraid box needs,
+- **History:** the whole conversation in one thread, oldest at the top and opening
+  on the latest: what the agent sent, and your answers right-aligned under it. An
+  answer to an older message is marked *Re: <headline>*. Tap a message to open it.
+- **Pairing:** push registration status, plus the settings the Unraid box needs,
   as a QR code and as text. **New keys** (two taps) rotates both secrets.
 
 Replies are queued, then sent by a `LightWork` job that retries with backoff, so
 replying offline is fine. Each reply carries an id the inbox de-duplicates on,
 so a resend never doubles up.
 
+A `sync` job fetches new messages (`GET /messages`) and the replies the inbox holds
+(`GET /replies`) when the tool opens and every 15 minutes after. Fetched messages
+carry the same signature as a push and are checked the same way, and a message that
+arrives both ways is kept once. The replies let a reinstalled tool rebuild its history,
+and confirm a reply as *sent* if the phone never heard back. The relay and the tool
+both keep 90 days.
+
 ## Honest limits
 
-- **No alert while the tool is closed.** The SDK wakes the tool for a push but has no
-  way to raise a notification, so a message waits until you open the tool.
+- **No alert while the tool is closed.** The SDK wakes the tool for a push or a sync
+  but has no way to raise a notification, so a message waits until you open the tool.
+- **Without push, a message can take up to 15 minutes** to reach the phone
+  (WorkManager's floor), or arrives as soon as you open the tool.
+- **History comes back only once the relay has the new keys.** A reinstall or **New
+  keys** makes a fresh `PUSH_KEY`; the relay re-signs what it keeps when it restarts
+  with it, and until then fetched messages fail their check and are skipped.
 - **Push is unverified on real hardware.** Registration is the SDK's own UnifiedPush
   path (`enablePushNotifications = true`). Whether LightOS issues an endpoint to a
   sideloaded tool, and what Light's server expects from the sender, can only be
@@ -69,10 +86,10 @@ Open **Pairing**. It shows:
 
 ```
 # relay container
-PUSH_ENDPOINT=https://…   (the tool's UnifiedPush endpoint on Light's server)
-PUSH_KEY=…                (signs every push; unsigned pushes are dropped)
+PUSH_ENDPOINT=https://…   (the tool's UnifiedPush endpoint on Light's server, if any)
+PUSH_KEY=…                (signs every message; unsigned ones are dropped)
 # inbox container
-REPLY_TOKEN=…             (bearer for POST /replies)
+REPLY_TOKEN=…             (bearer for the inbox: post replies, fetch messages and history)
 ```
 
 Put these in the two containers' settings on Unraid. To get them off the phone:
@@ -81,10 +98,11 @@ Put these in the two containers' settings on Unraid. To get them off the phone:
 - with the phone on USB, run `adb logcat -s RelayInbox`. A debug build logs the block
   when Pairing opens.
 
-If `PUSH_ENDPOINT` says *not registered yet*, LightOS hasn't issued an endpoint.
-That is the first thing to look into on hardware.
+If there's no endpoint yet, the block shows `# PUSH_ENDPOINT=` commented out. Leave it
+unset on the relay: messages are fetched instead, and push can be added later.
 
 ## Push format
 
-`v1.<hex HMAC-SHA256(PUSH_KEY, json)>.<json>`. `PushCodecTest` checks a vector produced
-by the relay's own `sign()`, so the two sides agree byte for byte.
+`v1.<hex HMAC-SHA256(PUSH_KEY, json)>.<json>`, the same whether it's pushed or fetched.
+`PushCodecTest` checks a vector produced by the relay's own `sign()`, and `SyncTest` a
+`GET /messages` response from its inbox, so the two sides agree byte for byte.
