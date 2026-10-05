@@ -15,8 +15,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -106,7 +106,7 @@ class ConversationScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(start = 2f.gridUnitsAsDp(), end = 1f.gridUnitsAsDp()),
+                        .padding(start = 2f.gridUnitsAsDp(), end = 0.33f.gridUnitsAsDp()),
                 ) {
                     if (conversation == null) {
                         LightText(text = "This conversation is gone.", variant = LightTextVariant.Copy, lighten = true)
@@ -179,16 +179,17 @@ internal fun timeline(conversation: Conversation): List<Entry> =
 /** Left, like the other side in Messages: the date, then the message, then any choices. */
 @Composable
 private fun AgentEntry(message: RelayMessage, canReply: Boolean, onChoice: (String) -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 1.5f.gridUnitsAsDp())) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 1.7f.gridUnitsAsDp())) {
         LightText(text = formatDateTime(message.receivedAt), variant = LightTextVariant.Detail, modifier = Modifier.fillMaxWidth())
-        LightText(text = message.headline, variant = LightTextVariant.Copy, modifier = Modifier.fillMaxWidth())
+        // Messages sets message text in Paragraph, not Copy.
+        LightText(text = message.headline, variant = LightTextVariant.Paragraph, modifier = Modifier.fillMaxWidth())
         if (message.detail.isNotBlank()) {
             LightText(
                 text = message.detail,
-                variant = LightTextVariant.Copy,
+                variant = LightTextVariant.Paragraph,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 0.5f.gridUnitsAsDp()),
+                    .padding(top = 0.25f.gridUnitsAsDp()),
             )
         }
         if (message.needsAnswer) {
@@ -208,17 +209,15 @@ private fun YourEntry(reply: Reply) {
         ReplyState.Failed -> " · not sent"
         ReplyState.Sent -> ""
     }
+    // As in Messages: the text block is only as wide as it needs and sits against the right
+    // edge, so a short reply is flush right and a long one fills the indent, left-aligned.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 1.5f.gridUnitsAsDp(), start = 2f.gridUnitsAsDp()),
+            .padding(top = 1.7f.gridUnitsAsDp(), start = 2f.gridUnitsAsDp()),
+        horizontalAlignment = Alignment.End,
     ) {
-        LightText(
-            text = formatDateTime(reply.at) + state,
-            variant = LightTextVariant.Detail,
-            align = TextAlign.End,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        LightText(text = reply.choice ?: reply.text.orEmpty(), variant = LightTextVariant.Copy, modifier = Modifier.fillMaxWidth())
+        LightText(text = formatDateTime(reply.at) + state, variant = LightTextVariant.Detail)
+        LightText(text = reply.choice ?: reply.text.orEmpty(), variant = LightTextVariant.Paragraph)
     }
 }
