@@ -2,6 +2,8 @@ package com.thelightphone.relayinbox
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import java.time.Instant
 
 @Serializable
@@ -41,6 +43,25 @@ data class Conversation(val id: String, val messages: List<RelayMessage>) {
     val needsAnswer: Boolean get() = messages.any { it.needsAnswer }
     val lastReply: Reply? get() = messages.flatMap { it.replies }.maxByOrNull { it.at }
 }
+
+/**
+ * Conversations you've archived, by id, with when. Kept on this phone only. A conversation
+ * stays archived until something new happens in it (a message, or a reply of yours); then it's
+ * back in the inbox, so nothing new is ever hidden.
+ */
+internal object Archive : JsonFileState<Map<String, Long>>(
+    fileName = "archive.json",
+    serializer = MapSerializer(String.serializer(), Long.serializer()),
+    empty = emptyMap(),
+) {
+    suspend fun archive(id: String, now: Long = System.currentTimeMillis()) = update { it + (id to now) }
+
+    suspend fun restore(id: String) = update { it - id }
+}
+
+/** Archived, and nothing has happened in it since. [archive] is [Archive]'s state. */
+internal fun Conversation.isArchived(archive: Map<String, Long>): Boolean =
+    archive[id]?.let { it >= lastActivity } == true
 
 /** Messages grouped by conversation, most recently active first. */
 internal fun conversations(messages: List<RelayMessage>): List<Conversation> =

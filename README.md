@@ -24,7 +24,11 @@ agent. Light's push server accepts pushes, but they don't reach the tool yet; se
   under its date, in the order they happened. A message still waiting on a choice shows
   its choices. The compose button replies to the latest message. A reply says *sending* or *not sent* until it reaches the relay,
   and **Retry** re-queues failures.
-- **Pairing** (the **Pair** button, then the settings icon once paired): push
+- **Archive:** the gear on a conversation archives it (or, once archived, moves it back).
+  Archived conversations are under the inbox's gear, in **Archived**. One comes back to the
+  inbox by itself as soon as anything new happens in it, so nothing new is ever hidden.
+  Archiving is kept on the phone only.
+- **Pairing** (the **Pair** button until it's paired, then under the inbox's gear): push
   registration status, plus the settings the Unraid box needs, as a QR code and as
   text. **New keys** (two taps) rotates both secrets.
 

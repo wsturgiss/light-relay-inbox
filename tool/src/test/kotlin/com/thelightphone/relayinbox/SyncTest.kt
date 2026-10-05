@@ -97,4 +97,17 @@ class SyncTest {
         val conversation = conversations(restored).single()
         assertEquals(listOf("t_8c1f0a2b3d4e5f60", "m4"), conversation.messages.map { it.id })
     }
+
+    @Test
+    fun `an archived conversation comes back when something new happens in it`() {
+        val quiet = conversations(listOf(message("m1", 10, Reply(id = "r1", choice = "Yes", at = 20)))).single()
+        assertTrue(quiet.isArchived(mapOf("m1" to 30)))
+        assertTrue(!quiet.isArchived(emptyMap()))
+
+        val busier = conversations(listOf(
+            message("m1", 10, Reply(id = "r1", choice = "Yes", at = 20)),
+            message("m2", 40).copy(thread = "m1"),
+        )).single()
+        assertTrue(!busier.isArchived(mapOf("m1" to 30)))
+    }
 }

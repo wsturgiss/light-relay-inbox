@@ -45,6 +45,20 @@ class ConversationViewModel : LightViewModel<Unit>() {
         }
     }
 
+    fun archive(threadId: String, then: () -> Unit) {
+        viewModelScope.launch {
+            Archive.archive(threadId)
+            then()
+        }
+    }
+
+    fun restore(threadId: String, then: () -> Unit) {
+        viewModelScope.launch {
+            Archive.restore(threadId)
+            then()
+        }
+    }
+
     fun retry(context: SealedLightContext) {
         viewModelScope.launch {
             RelayStore.retryFailed()
@@ -73,6 +87,7 @@ class ConversationScreen(
         val themeColors by LightThemeController.colors.collectAsState()
         val messages by RelayStore.state.collectAsState()
         val keys by Pairing.keys.collectAsState()
+        val archive by Archive.state.collectAsState()
         val conversation = remember(messages) { conversations(messages).firstOrNull { it.id == threadId } }
         val scrollState = rememberScrollState()
         // Follow the bottom while the layout settles and as messages arrive, until you scroll up.
@@ -98,6 +113,23 @@ class ConversationScreen(
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text(conversation?.messages?.first()?.headline.orEmpty()),
+                    rightButton = conversation?.let { c ->
+                        LightBarButton.LightIcon(icon = LightIcons.SETTINGS, onClick = {
+                            val archived = c.isArchived(archive)
+                            navigateTo(
+                                screenFactory = {
+                                    MenuScreen(it, "Conversation", listOf(if (archived) MenuItem("restore", "Move to inbox") else MenuItem("archive", "Archive")))
+                                },
+                                resultCallback = { key ->
+                                    when (key) {
+                                        // Archived: back to where you came from, which no longer lists it.
+                                        "archive" -> viewModel.archive(threadId) { goBack() }
+                                        "restore" -> viewModel.restore(threadId) { goBack() }
+                                    }
+                                },
+                            )
+                        })
+                    },
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 

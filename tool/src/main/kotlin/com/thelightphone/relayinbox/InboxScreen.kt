@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -61,6 +62,10 @@ class InboxScreen(
         val themeColors by LightThemeController.colors.collectAsState()
         val messages by RelayStore.state.collectAsState()
         val keys by Pairing.keys.collectAsState()
+        val archive by Archive.state.collectAsState()
+        val all = remember(messages) { conversations(messages) }
+        val inbox = all.filterNot { it.isArchived(archive) }
+        val archivedCount = all.size - inbox.size
 
         LaunchedEffect(Unit) {
             openStores(lightContext.filesDir)
@@ -77,34 +82,36 @@ class InboxScreen(
             ) {
                 LightTopBar(
                     center = LightTopBarCenter.Text("Relay Inbox"),
-                    rightButton = if (keys == null) null else LightBarButton.LightIcon(
+                    rightButton = LightBarButton.LightIcon(
                         icon = LightIcons.SETTINGS,
-                        onClick = { navigateTo(screenFactory = { PairingScreen(it) }) },
+                        onClick = {
+                            val items = listOf(
+                                MenuItem("archived", if (archivedCount > 0) "Archived ($archivedCount)" else "Archived"),
+                                MenuItem("pairing", "Pairing"),
+                            )
+                            navigateTo(
+                                screenFactory = { MenuScreen(it, "Relay Inbox", items) },
+                                resultCallback = { key ->
+                                    when (key) {
+                                        "archived" -> navigateTo(screenFactory = { ArchivedScreen(it) })
+                                        "pairing" -> navigateTo(screenFactory = { PairingScreen(it) })
+                                    }
+                                },
+                            )
+                        },
                     ),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
-                if (messages.isEmpty()) {
+                if (inbox.isEmpty()) {
                     EmptyBody(paired = keys != null, modifier = Modifier.weight(1f))
                 } else {
-                    LightScrollView(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(start = 1f.gridUnitsAsDp()),
-                    ) {
-                        val threads = conversations(messages)
-                        threads.forEachIndexed { index, conversation ->
-                            ConversationRow(conversation) {
-                                navigateTo(screenFactory = { ConversationScreen(it, conversation.id) })
-                            }
-                            if (index != threads.lastIndex) Divider()
-                        }
-                        Spacer(modifier = Modifier.height(2f.gridUnitsAsDp()))
+                    ConversationList(inbox, modifier = Modifier.weight(1f)) { conversation ->
+                        navigateTo(screenFactory = { ConversationScreen(it, conversation.id) })
                     }
                 }
 
-                // Pairing is a one-time setup: a bottom-bar action until it's done, then the top-bar icon.
+                // Pairing is a one-time setup: a bottom-bar action until it's done; after that it's in the gear.
                 LightBottomBar(
                     items = if (keys == null) {
                         listOf(LightBarButton.Text(text = "Pair", onClick = { navigateTo(screenFactory = { PairingScreen(it) }) }))
@@ -160,6 +167,22 @@ private fun EmptyBody(paired: Boolean, modifier: Modifier = Modifier) {
                     .padding(top = 0.75f.gridUnitsAsDp()),
             )
         }
+    }
+}
+
+/** Conversations as inbox rows, divided. Shared by the inbox and Archived. */
+@Composable
+internal fun ConversationList(conversations: List<Conversation>, modifier: Modifier = Modifier, onOpen: (Conversation) -> Unit) {
+    LightScrollView(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 1f.gridUnitsAsDp()),
+    ) {
+        conversations.forEachIndexed { index, conversation ->
+            ConversationRow(conversation) { onOpen(conversation) }
+            if (index != conversations.lastIndex) Divider()
+        }
+        Spacer(modifier = Modifier.height(2f.gridUnitsAsDp()))
     }
 }
 

@@ -83,4 +83,5 @@ internal suspend fun openStores(dir: File) {
     RelayStore.open(dir)
     Pairing.open(dir)
     SyncCursor.open(dir)
+    Archive.open(dir)
 }
