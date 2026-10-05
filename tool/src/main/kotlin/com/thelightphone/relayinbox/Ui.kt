@@ -49,9 +49,9 @@ internal fun formatTime(epochMillis: Long): String {
     }
 }
 
-/** "You: Yes", plus how it's going until it has reached the relay. */
-internal fun Reply.label(): String {
-    val what = choice ?: "“${text.orEmpty().take(40)}”"
+/** "You: Yes", plus how it's going until it has reached the relay. [full] keeps all of typed text. */
+internal fun Reply.label(full: Boolean = false): String {
+    val what = choice ?: if (full) text.orEmpty() else "“${text.orEmpty().take(40)}”"
     return when (state) {
         ReplyState.Pending -> "You: $what · sending"
         ReplyState.Sent -> "You: $what"

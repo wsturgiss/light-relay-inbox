@@ -10,6 +10,14 @@ data class RelayMessage(
     val headline: String,
     val detail: String = "",
     val choices: List<String> = emptyList(),
+    /** The first message of the conversation this continues; null when it starts one. */
+    val thread: String? = null,
+    /**
+     * Started on this phone, not sent by the agent: the start of a conversation you began.
+     * Its id is the conversation's (`t_…`), [headline] is the title, and its replies are
+     * what you wrote before the agent answered.
+     */
+    val mine: Boolean = false,
     /** When the relay sent it, ISO-8601 UTC, as the relay stamped it. */
     val sentAt: String = "",
     /** When the phone received it, epoch millis. Fetched history uses [sentAt] instead. */
@@ -17,6 +25,28 @@ data class RelayMessage(
     val read: Boolean = false,
     val replies: List<Reply> = emptyList(),
 )
+
+/** The conversation this message is part of: the first message's id. */
+val RelayMessage.threadId: String get() = thread ?: id
+
+/** Waiting on you: it offers choices and you haven't answered. */
+val RelayMessage.needsAnswer: Boolean
+    get() = choices.isNotEmpty() && replies.none { it.choice != null && it.state != ReplyState.Failed }
+
+/** One conversation, oldest message first. */
+data class Conversation(val id: String, val messages: List<RelayMessage>) {
+    val latest: RelayMessage get() = messages.last()
+    val lastActivity: Long get() = messages.maxOf { m -> maxOf(m.receivedAt, m.replies.maxOfOrNull { it.at } ?: 0) }
+    val unread: Boolean get() = messages.any { !it.read }
+    val needsAnswer: Boolean get() = messages.any { it.needsAnswer }
+    val lastReply: Reply? get() = messages.flatMap { it.replies }.maxByOrNull { it.at }
+}
+
+/** Messages grouped by conversation, most recently active first. */
+internal fun conversations(messages: List<RelayMessage>): List<Conversation> =
+    messages.groupBy { it.threadId }
+        .map { (id, ms) -> Conversation(id, ms.sortedBy { it.receivedAt }) }
+        .sortedByDescending { it.lastActivity }
 
 @Serializable
 data class Reply(
@@ -57,7 +87,24 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
     /** See [withInboxReplies]. */
     suspend fun mergeReplies(fromInbox: List<InboxReply>) = update { withInboxReplies(it, fromInbox) }
 
-    suspend fun markRead(id: String) = updateMessage(id) { it.copy(read = true) }
+    /** Starts a conversation from the phone: [text]'s first line is the title. Returns its reply, queued to send. */
+    suspend fun startConversation(text: String, now: Long = System.currentTimeMillis()): RelayMessage {
+        val (title, _) = splitTitle(text)
+        val message = RelayMessage(
+            id = "t_" + randomHex(8),
+            headline = title,
+            mine = true,
+            receivedAt = now,
+            read = true,
+            replies = listOf(Reply(id = "r_" + randomHex(8), text = text, at = now)),
+        )
+        add(message)
+        return message
+    }
+
+    suspend fun markThreadRead(threadId: String) = update { list ->
+        list.map { if (it.threadId == threadId && !it.read) it.copy(read = true) else it }
+    }
 
     suspend fun addReply(messageId: String, reply: Reply) =
         updateMessage(messageId) { it.copy(replies = it.replies + reply) }
@@ -90,8 +137,14 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
  * message this phone no longer has are dropped.
  */
 internal fun withInboxReplies(list: List<RelayMessage>, fromInbox: List<InboxReply>): List<RelayMessage> {
-    val byMessage = fromInbox.groupBy { it.messageId }
-    return list.map { m ->
+    // A conversation you started is filed under its thread; everything else under its message.
+    val byMessage = fromInbox.groupBy { it.messageId ?: it.thread }
+    // Starts that this phone no longer has (a reinstall) come back as the conversation's root.
+    val restoredStarts = fromInbox
+        .filter { it.messageId == null && it.thread != null && it.title != null && list.none { m -> m.id == it.thread } }
+        .distinctBy { it.thread }
+        .map { RelayMessage(id = it.thread!!, headline = it.title!!, mine = true, receivedAt = it.sentAtMillis(), read = true) }
+    return (list + restoredStarts).map { m ->
         val incoming = byMessage[m.id].orEmpty()
         if (incoming.isEmpty()) return@map m
         val stored = incoming.map { it.id }.toSet()
@@ -110,6 +163,9 @@ data class InboxReply(
     val seq: Long,
     val id: String,
     val messageId: String? = null,
+    /** Set, with [title], on what you wrote in a conversation you started. */
+    val thread: String? = null,
+    val title: String? = null,
     val choice: String? = null,
     val text: String? = null,
     val sentAt: String? = null,
@@ -117,6 +173,23 @@ data class InboxReply(
 ) {
     fun sentAtMillis(): Long = parseInstant(sentAt) ?: parseInstant(receivedAt) ?: 0
 }
+
+/**
+ * A conversation's title is the first line you wrote. A single line is its own title,
+ * cut at a word near 40 characters. Returns the title and the full text.
+ */
+internal fun splitTitle(text: String): Pair<String, String> {
+    val trimmed = text.trim()
+    val firstLine = trimmed.lineSequence().first().trim()
+    val title = when {
+        firstLine.length <= 40 -> firstLine
+        else -> firstLine.take(40).substringBeforeLast(' ').ifBlank { firstLine.take(40) } + "…"
+    }
+    return title.take(120) to trimmed
+}
+
+internal fun randomHex(bytes: Int): String =
+    ByteArray(bytes).also { java.security.SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
 
 internal fun parseInstant(iso: String?): Long? =
     iso?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }

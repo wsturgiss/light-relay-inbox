@@ -26,7 +26,9 @@ internal fun scheduleReplySend(context: SealedLightContext) {
 @Serializable
 private data class ReplyBody(
     val id: String,
-    val messageId: String,
+    val messageId: String?,
+    val thread: String?,
+    val title: String?,
     val choice: String?,
     val text: String?,
     val sentAt: String,
@@ -49,7 +51,16 @@ val sendReplies: LightJobHandler = { ctx, _ ->
         for ((message, reply) in RelayStore.pending()) {
             val body = json.encodeToString(
                 ReplyBody.serializer(),
-                ReplyBody(reply.id, message.id, reply.choice, reply.text, Instant.ofEpochMilli(reply.at).toString()),
+                ReplyBody(
+                    id = reply.id,
+                    // Written in a conversation you started, before the agent answered.
+                    messageId = message.id.takeUnless { message.mine },
+                    thread = message.id.takeIf { message.mine },
+                    title = message.headline.takeIf { message.mine },
+                    choice = reply.choice,
+                    text = reply.text,
+                    sentAt = Instant.ofEpochMilli(reply.at).toString(),
+                ),
             )
             val status = try {
                 withContext(Dispatchers.IO) { post(url, token, body) }
