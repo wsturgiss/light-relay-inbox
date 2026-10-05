@@ -36,7 +36,7 @@ On **baconstation**, in Docker, restarting on its own:
     (`https://production.lightphonecloud.com/api/webhooks/unified_push/deliver/<uuid>`).
   - `relayctl.py notify` → outbox → `GET /messages` → tool works end to end. Replying
     **Yes** reached `relayctl.py replies` about a second later.
-  - The inbox synced the Sept 30 test replies back into history.
+  - The inbox synced the Sept 30 test replies back onto their messages.
   - Light's push server **accepts** the relay's push (`"pushed": true`).
 
 **Not working yet:** a push accepted by Light's server never reaches the tool. Nothing
@@ -82,7 +82,7 @@ adb install -r tool/build/outputs/apk/debug/tool-debug.apk
      LightOS side. Registration goes through `pushEndpointFetcher`.
    - If LightOS never issues an endpoint, the tool still works: it fetches messages
      from the inbox (`GET /messages`, with the reply token) when opened and every 15
-     minutes. This was decided with Will on 2026-10-04, along with server-backed history.
+     minutes. This was decided with Will on 2026-10-04, along with rebuilding the inbox from the relay.
 2. **Pair.** On baconstation:
    - put `PUSH_KEY` in `relay.env`, and `PUSH_ENDPOINT` too if there is one;
    - replace `REPLY_TOKEN` in `inbox.env` with the phone's value;
@@ -100,8 +100,7 @@ adb install -r tool/build/outputs/apk/debug/tool-debug.apk
      doesn't show, check logcat for `failed signature check` (the keys don't match) or
      `Can't sync`.
 4. **Reply from the phone,** then `relayctl.py replies --ack`.
-5. **History.** Open **History** from the Inbox. To check the rebuild, reinstall (or
-   clear the app's data), re-pair, put the new `PUSH_KEY` and `REPLY_TOKEN` on the box
+5. **Rebuilding the inbox.** To check it, reinstall (or clear the app's data), re-pair, put the new `PUSH_KEY` and `REPLY_TOKEN` on the box
    and re-run `up.sh`. The relay re-signs its kept messages under the new key at startup,
    so the whole conversation should come back on the next sync.
 6. **Pushes that arrive with the tool closed.** `onPushNotification` gets no Context
@@ -122,7 +121,9 @@ adb install -r tool/build/outputs/apk/debug/tool-debug.apk
   in the inbox until it's opened.
 - **Sync** (`Sync.kt`): `GET /messages` and `GET /replies` on the inbox, with the reply
   token, paged from the phone's own cursor in `sync.json`. Fetched messages go through
-  `PushCodec` like pushes. History is 90 days on both sides.
+  `PushCodec` like pushes. Both sides keep 90 days.
+- **No separate History screen.** One was tried and removed on 2026-10-05: with replies
+  shown on each message, it only re-sorted the inbox.
 
 ## Later
 

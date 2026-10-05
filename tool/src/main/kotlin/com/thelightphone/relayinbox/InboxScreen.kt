@@ -22,6 +22,7 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
+import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -66,6 +67,10 @@ class InboxScreen(
             ) {
                 LightTopBar(
                     center = LightTopBarCenter.Text("Relay Inbox"),
+                    rightButton = if (keys == null) null else LightBarButton.LightIcon(
+                        icon = LightIcons.SETTINGS,
+                        onClick = { navigateTo(screenFactory = { PairingScreen(it) }) },
+                    ),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
@@ -88,19 +93,14 @@ class InboxScreen(
                     }
                 }
 
-                LightBottomBar(
-                    items = buildList {
-                        if (messages.isNotEmpty()) {
-                            add(LightBarButton.Text(text = "History", onClick = { navigateTo(screenFactory = { HistoryScreen(it) }) }))
-                        }
-                        add(
-                            LightBarButton.Text(
-                                text = if (keys == null) "Pair" else "Pairing",
-                                onClick = { navigateTo(screenFactory = { PairingScreen(it) }) },
-                            ),
-                        )
-                    },
-                )
+                // Pairing is a one-time setup: a bottom-bar action until it's done, then the top-bar icon.
+                if (keys == null) {
+                    LightBottomBar(
+                        items = listOf(
+                            LightBarButton.Text(text = "Pair", onClick = { navigateTo(screenFactory = { PairingScreen(it) }) }),
+                        ),
+                    )
+                }
             }
         }
     }

@@ -61,24 +61,4 @@ class SyncTest {
         assertTrue(m1.read)
         assertEquals(emptyList(), merged.first { it.id == "m2" }.replies)
     }
-
-    @Test
-    fun `the conversation runs in order and marks answers to older messages`() {
-        val messages = listOf(
-            message("m2", 20, Reply(id = "r2", text = "late answer", at = 30)),
-            message("m1", 10, Reply(id = "r1", choice = "Yes", at = 15)),
-        )
-        val turns = conversation(messages)
-        assertEquals(
-            listOf("m1", "r1", "m2", "r2"),
-            turns.map { if (it is Turn.Answered) it.reply.id else (it as Turn.Sent).message.id },
-        )
-        // r1 follows m1 directly; r2 follows m2 directly.
-        assertEquals(listOf(null, null), turns.filterIsInstance<Turn.Answered>().map { it.context })
-
-        val interleaved = conversation(
-            listOf(message("m2", 20), message("m1", 10, Reply(id = "r1", choice = "Yes", at = 25))),
-        )
-        assertEquals("h-m1", (interleaved.last() as Turn.Answered).context)
-    }
 }

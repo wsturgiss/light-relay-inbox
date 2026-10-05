@@ -104,7 +104,7 @@ class MessageScreen(
                         )
                     }
 
-                    if (message.choices.isNotEmpty()) {
+                    if (message.choices.isNotEmpty() && !answered) {
                         Spacer(modifier = Modifier.height(1.5f.gridUnitsAsDp()))
                         Divider()
                         Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
@@ -116,16 +116,21 @@ class MessageScreen(
                     }
 
                     if (message.replies.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+                        Spacer(modifier = Modifier.height(1.5f.gridUnitsAsDp()))
                         Divider()
                         message.replies.forEach { reply ->
                             LightText(
-                                text = "You: ${reply.label()}",
-                                variant = LightTextVariant.Detail,
-                                lighten = true,
+                                text = reply.label(),
+                                variant = LightTextVariant.Copy,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 0.75f.gridUnitsAsDp()),
+                                    .padding(top = 1f.gridUnitsAsDp()),
+                            )
+                            LightText(
+                                text = formatTime(reply.at),
+                                variant = LightTextVariant.Detail,
+                                lighten = true,
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }

@@ -14,17 +14,15 @@ agent. Light's push server accepts pushes, but they don't reach the tool yet; se
 
 ## What it does
 
-- **Inbox:** messages newest first, each showing the headline, two lines of detail,
-  and the time it arrived. `•` marks unread messages. A message that has choices and
-  no answer yet says so.
-- **Message:** the full text, its choices as tappable rows, and **Reply** for free
-  text. Each reply is shown as *sending*, *sent* or *not sent*, and **Retry** re-queues
-  failures.
-- **History:** the whole conversation in one thread, oldest at the top and opening
-  on the latest: what the agent sent, and your answers right-aligned under it. An
-  answer to an older message is marked *Re: <headline>*. Tap a message to open it.
-- **Pairing:** push registration status, plus the settings the Unraid box needs,
-  as a QR code and as text. **New keys** (two taps) rotates both secrets.
+- **Inbox:** the conversation, newest first. Each message shows its headline, two
+  lines of detail, the time, and your latest answer (*You: Yes*). `•` marks unread
+  messages. A message that has choices and no answer yet says so.
+- **Message:** the full text, its choices as tappable rows until you've answered,
+  your replies, and **Reply** for free text. A reply says *sending* or *not sent* until
+  it reaches the relay, and **Retry** re-queues failures.
+- **Pairing** (the **Pair** button, then the settings icon once paired): push
+  registration status, plus the settings the Unraid box needs, as a QR code and as
+  text. **New keys** (two taps) rotates both secrets.
 
 Replies are queued, then sent by a `LightWork` job that retries with backoff, so
 replying offline is fine. Each reply carries an id the inbox de-duplicates on,
@@ -33,7 +31,7 @@ so a resend never doubles up.
 A `sync` job fetches new messages (`GET /messages`) and the replies the inbox holds
 (`GET /replies`) when the tool opens and every 15 minutes after. Fetched messages
 carry the same signature as a push and are checked the same way, and a message that
-arrives both ways is kept once. The replies let a reinstalled tool rebuild its history,
+arrives both ways is kept once. The replies let a reinstalled tool rebuild its inbox,
 and confirm a reply as *sent* if the phone never heard back. The relay and the tool
 both keep 90 days.
 
@@ -43,7 +41,7 @@ both keep 90 days.
   but has no way to raise a notification, so a message waits until you open the tool.
 - **Without push, a message can take up to 15 minutes** to reach the phone
   (WorkManager's floor), or arrives as soon as you open the tool.
-- **History comes back only once the relay has the new keys.** A reinstall or **New
+- **A rebuilt inbox comes back only once the relay has the new keys.** A reinstall or **New
   keys** makes a fresh `PUSH_KEY`; the relay re-signs what it keeps when it restarts
   with it, and until then fetched messages fail their check and are skipped.
 - **Push is unverified on real hardware.** Registration is the SDK's own UnifiedPush
@@ -89,7 +87,7 @@ Open **Pairing**. It shows:
 PUSH_ENDPOINT=https://…   (the tool's UnifiedPush endpoint on Light's server, if any)
 PUSH_KEY=…                (signs every message; unsigned ones are dropped)
 # inbox container
-REPLY_TOKEN=…             (bearer for the inbox: post replies, fetch messages and history)
+REPLY_TOKEN=…             (bearer for the inbox: post replies, fetch messages and past replies)
 ```
 
 Put these in the two containers' settings on Unraid. To get them off the phone:
