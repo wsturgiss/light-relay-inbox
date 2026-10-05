@@ -106,11 +106,14 @@ class InboxScreen(
 
                 // Pairing is a one-time setup: a bottom-bar action until it's done, then the top-bar icon.
                 LightBottomBar(
-                    items = listOf(
-                        if (keys == null) {
-                            LightBarButton.Text(text = "Pair", onClick = { navigateTo(screenFactory = { PairingScreen(it) }) })
-                        } else {
-                            LightBarButton.Text(text = "New", onClick = {
+                    items = if (keys == null) {
+                        listOf(LightBarButton.Text(text = "Pair", onClick = { navigateTo(screenFactory = { PairingScreen(it) }) }))
+                    } else {
+                        // Compose on the right, as in Messages.
+                        listOf(
+                            null,
+                            null,
+                            LightBarButton.LightIcon(icon = LightIcons.COMPOSE_MESSAGE, onClick = {
                                 navigateTo(
                                     screenFactory = {
                                         TextEditorScreen(it, EditorRequest(title = "New conversation", initialValue = "", initialCaps = true))
@@ -119,9 +122,9 @@ class InboxScreen(
                                         if (text.isNotBlank()) viewModel.startConversation(lightContext, text)
                                     },
                                 )
-                            })
-                        },
-                    ),
+                            }),
+                        )
+                    },
                 )
             }
         }

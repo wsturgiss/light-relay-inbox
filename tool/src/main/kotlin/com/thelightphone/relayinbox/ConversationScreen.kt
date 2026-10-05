@@ -133,25 +133,25 @@ class ConversationScreen(
                 }
 
                 val hasFailed = conversation?.messages?.any { m -> m.replies.any { it.state == ReplyState.Failed } } == true
+                // Left, centre, right, as in Messages: compose on the right, Retry in the middle when needed.
                 LightBottomBar(
-                    items = buildList {
+                    items = listOf(
+                        null,
+                        if (hasFailed && canReply) LightBarButton.Text(text = "Retry", onClick = { viewModel.retry(lightContext) }) else null,
                         if (conversation != null && canReply) {
                             val latest = conversation.latest
-                            add(
-                                LightBarButton.LightIcon(icon = LightIcons.COMPOSE_MESSAGE, onClick = {
-                                    navigateTo(
-                                        screenFactory = { TextEditorScreen(it, EditorRequest(title = "Reply", initialValue = "", initialCaps = true)) },
-                                        resultCallback = { text ->
-                                            if (text.isNotBlank()) viewModel.reply(lightContext, latest.id, text = text.trim())
-                                        },
-                                    )
-                                }),
-                            )
-                        }
-                        if (hasFailed && canReply) {
-                            add(LightBarButton.Text(text = "Retry", onClick = { viewModel.retry(lightContext) }))
-                        }
-                    },
+                            LightBarButton.LightIcon(icon = LightIcons.COMPOSE_MESSAGE, onClick = {
+                                navigateTo(
+                                    screenFactory = { TextEditorScreen(it, EditorRequest(title = "Reply", initialValue = "", initialCaps = true)) },
+                                    resultCallback = { text ->
+                                        if (text.isNotBlank()) viewModel.reply(lightContext, latest.id, text = text.trim())
+                                    },
+                                )
+                            })
+                        } else {
+                            null
+                        },
+                    ),
                 )
             }
         }
