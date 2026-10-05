@@ -55,6 +55,7 @@ class InboxScreen(
             openStores(lightContext.filesDir)
             // Anything left unsent from last time (offline, killed) goes out now.
             if (RelayStore.pending().isNotEmpty()) scheduleReplySend(lightContext)
+            if (Pairing.keys.value != null) scheduleSync(lightContext)
         }
 
         LightTheme(colors = themeColors) {
@@ -88,12 +89,17 @@ class InboxScreen(
                 }
 
                 LightBottomBar(
-                    items = listOf(
-                        LightBarButton.Text(
-                            text = if (keys == null) "Pair" else "Pairing",
-                            onClick = { navigateTo(screenFactory = { PairingScreen(it) }) },
-                        ),
-                    ),
+                    items = buildList {
+                        if (messages.isNotEmpty()) {
+                            add(LightBarButton.Text(text = "History", onClick = { navigateTo(screenFactory = { HistoryScreen(it) }) }))
+                        }
+                        add(
+                            LightBarButton.Text(
+                                text = if (keys == null) "Pair" else "Pairing",
+                                onClick = { navigateTo(screenFactory = { PairingScreen(it) }) },
+                            ),
+                        )
+                    },
                 )
             }
         }
@@ -117,7 +123,7 @@ private fun EmptyBody(paired: Boolean, modifier: Modifier = Modifier) {
             )
             LightText(
                 text = if (paired) {
-                    "Messages from the agent wait here until you open the tool."
+                    "Messages from the agent arrive when the tool checks in, every 15 minutes or when you open it."
                 } else {
                     "Open Pair and enter the codes in the relay's settings on the Unraid box."
                 },

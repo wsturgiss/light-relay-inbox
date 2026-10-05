@@ -98,15 +98,15 @@ class PairingScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 1f.gridUnitsAsDp()),
                 ) {
-                    Status("Push", if (endpoint != null) "registered with LightOS" else "waiting for LightOS…")
+                    Status("Push", if (endpoint != null) "registered with LightOS" else "none yet; messages are fetched every 15 min")
                     Status("Reply inbox", inboxUrl().ifEmpty { "not set in this build" })
 
                     if (block != null) {
                         Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
                         QrCode(block, modifier = Modifier.fillMaxWidth())
                         LightText(
-                            text = "Put PUSH_ENDPOINT and PUSH_KEY in the relay container's settings, " +
-                                "and REPLY_TOKEN in the inbox container's.",
+                            text = "Put PUSH_KEY (and PUSH_ENDPOINT, once there is one) in the relay " +
+                                "container's settings, and REPLY_TOKEN in the inbox container's.",
                             variant = LightTextVariant.Detail,
                             lighten = true,
                             modifier = Modifier.padding(top = 1f.gridUnitsAsDp()),

@@ -44,7 +44,8 @@ internal object Pairing : JsonFileState<PairingKeys?>(
     /** What to paste into the two containers' settings on Unraid. */
     fun settingsBlock(endpoint: String?, keys: PairingKeys): String = buildString {
         appendLine("# relay container")
-        appendLine("PUSH_ENDPOINT=${endpoint ?: "(not registered yet)"}")
+        // Without an endpoint the relay still takes messages; the tool fetches them.
+        appendLine(if (endpoint != null) "PUSH_ENDPOINT=$endpoint" else "# PUSH_ENDPOINT= (none yet: messages are fetched)")
         appendLine("PUSH_KEY=${keys.pushKey}")
         appendLine("# inbox container")
         append("REPLY_TOKEN=${keys.replyToken}")

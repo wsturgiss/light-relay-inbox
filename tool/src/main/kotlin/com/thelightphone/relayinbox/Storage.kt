@@ -82,4 +82,5 @@ internal suspend fun openStores(dir: File) {
     ToolFiles.remember(dir)
     RelayStore.open(dir)
     Pairing.open(dir)
+    SyncCursor.open(dir)
 }

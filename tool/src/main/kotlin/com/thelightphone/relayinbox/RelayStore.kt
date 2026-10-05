@@ -2,6 +2,7 @@ package com.thelightphone.relayinbox
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import java.time.Instant
 
 @Serializable
 data class RelayMessage(
@@ -11,7 +12,7 @@ data class RelayMessage(
     val choices: List<String> = emptyList(),
     /** When the relay sent it, ISO-8601 UTC, as the relay stamped it. */
     val sentAt: String = "",
-    /** When the phone received it, epoch millis. */
+    /** When the phone received it, epoch millis. Fetched history uses [sentAt] instead. */
     val receivedAt: Long,
     val read: Boolean = false,
     val replies: List<Reply> = emptyList(),
@@ -29,15 +30,16 @@ data class Reply(
 @Serializable
 enum class ReplyState { Pending, Sent, Failed }
 
-/** The inbox, newest first. */
+/** The conversation, newest first. Kept as long as the relay keeps it. */
 internal object RelayStore : JsonFileState<List<RelayMessage>>(
     fileName = "messages.json",
     serializer = ListSerializer(RelayMessage.serializer()),
     empty = emptyList(),
 ) {
-    private const val KEEP = 200
+    private const val KEEP = 1000
+    private const val KEEP_DAYS = 90L
 
-    /** Adds a pushed message. False if it was already here (a redelivered push). */
+    /** Adds a pushed or fetched message. False if it was already here (pushed and fetched, or redelivered). */
     suspend fun add(message: RelayMessage): Boolean {
         var added = false
         update { list ->
@@ -45,11 +47,15 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
                 list
             } else {
                 added = true
-                (listOf(message) + list).sortedByDescending { it.receivedAt }.take(KEEP)
+                val cutoff = System.currentTimeMillis() - KEEP_DAYS * 86_400_000
+                (listOf(message) + list).filter { it.receivedAt >= cutoff }.sortedByDescending { it.receivedAt }.take(KEEP)
             }
         }
         return added
     }
+
+    /** See [withInboxReplies]. */
+    suspend fun mergeReplies(fromInbox: List<InboxReply>) = update { withInboxReplies(it, fromInbox) }
 
     suspend fun markRead(id: String) = updateMessage(id) { it.copy(read = true) }
 
@@ -76,3 +82,41 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
     private suspend fun updateMessage(id: String, transform: (RelayMessage) -> RelayMessage) =
         update { list -> list.map { if (it.id == id) transform(it) else it } }
 }
+
+/**
+ * Replies as the inbox stored them. One already here was sent from this phone, and the
+ * inbox having it means it's [ReplyState.Sent]. One that isn't is history from before a
+ * reinstall: it goes back under its message, which then counts as read. Replies to a
+ * message this phone no longer has are dropped.
+ */
+internal fun withInboxReplies(list: List<RelayMessage>, fromInbox: List<InboxReply>): List<RelayMessage> {
+    val byMessage = fromInbox.groupBy { it.messageId }
+    return list.map { m ->
+        val incoming = byMessage[m.id].orEmpty()
+        if (incoming.isEmpty()) return@map m
+        val stored = incoming.map { it.id }.toSet()
+        val known = m.replies.map { it.id }.toSet()
+        val updated = m.replies.map { if (it.id in stored && it.state != ReplyState.Sent) it.copy(state = ReplyState.Sent) else it }
+        val restored = incoming.filter { it.id !in known }.map {
+            Reply(id = it.id, choice = it.choice, text = it.text, at = it.sentAtMillis(), state = ReplyState.Sent)
+        }
+        m.copy(read = m.read || restored.isNotEmpty(), replies = (updated + restored).sortedBy { it.at })
+    }
+}
+
+/** A reply as `GET /replies` on the inbox returns it. */
+@Serializable
+data class InboxReply(
+    val seq: Long,
+    val id: String,
+    val messageId: String? = null,
+    val choice: String? = null,
+    val text: String? = null,
+    val sentAt: String? = null,
+    val receivedAt: String = "",
+) {
+    fun sentAtMillis(): Long = parseInstant(sentAt) ?: parseInstant(receivedAt) ?: 0
+}
+
+internal fun parseInstant(iso: String?): Long? =
+    iso?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
