@@ -14,12 +14,15 @@ agent. Light's push server accepts pushes, but they don't reach the tool yet; se
 
 ## What it does
 
-- **Inbox:** the conversation, newest first. Each message shows its headline, two
-  lines of detail, the time, and your latest answer (*You: Yes*). `•` marks unread
-  messages. A message that has choices and no answer yet says so.
-- **Message:** the full text, its choices as tappable rows until you've answered,
-  your replies, and **Reply** for free text. A reply says *sending* or *not sent* until
-  it reaches the relay, and **Retry** re-queues failures.
+- **Inbox:** one row per conversation, most recently active first. Each row shows the
+  conversation's title (its first headline), where it has got to, the last activity
+  and how many messages it has. `•` marks unread ones, and a conversation with a
+  choice still to make says so. **New** starts a conversation: type it, and the first
+  line becomes the title.
+- **Conversation:** every message in order, opening on the latest, with your replies
+  under each. A message still waiting on a choice shows its choices. **Reply** answers
+  the latest message. A reply says *sending* or *not sent* until it reaches the relay,
+  and **Retry** re-queues failures.
 - **Pairing** (the **Pair** button, then the settings icon once paired): push
   registration status, plus the settings the Unraid box needs, as a QR code and as
   text. **New keys** (two taps) rotates both secrets.
