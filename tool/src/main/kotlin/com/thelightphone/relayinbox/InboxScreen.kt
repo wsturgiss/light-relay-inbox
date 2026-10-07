@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -20,8 +21,12 @@ import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
+import com.thelightphone.sdk.SealedLightContext
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
+import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -33,7 +38,14 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
-class InboxViewModel : LightViewModel<Unit>()
+class InboxViewModel : LightViewModel<Unit>() {
+    fun startConversation(context: SealedLightContext, text: String) {
+        viewModelScope.launch {
+            RelayStore.startConversation(text)
+            scheduleReplySend(context)
+        }
+    }
+}
 
 @InitialScreen
 class InboxScreen(
@@ -50,6 +62,10 @@ class InboxScreen(
         val themeColors by LightThemeController.colors.collectAsState()
         val messages by RelayStore.state.collectAsState()
         val keys by Pairing.keys.collectAsState()
+        val archive by Archive.state.collectAsState()
+        val all = remember(messages) { conversations(messages) }
+        val inbox = all.filterNot { it.isArchived(archive) }
+        val archivedCount = all.size - inbox.size
 
         LaunchedEffect(Unit) {
             openStores(lightContext.filesDir)
@@ -66,38 +82,54 @@ class InboxScreen(
             ) {
                 LightTopBar(
                     center = LightTopBarCenter.Text("Relay Inbox"),
+                    rightButton = LightBarButton.LightIcon(
+                        icon = LightIcons.SETTINGS,
+                        onClick = {
+                            val items = listOf(
+                                MenuItem("archived", if (archivedCount > 0) "Archived ($archivedCount)" else "Archived"),
+                                MenuItem("pairing", "Pairing"),
+                            )
+                            navigateTo(
+                                screenFactory = { MenuScreen(it, "Relay Inbox", items) },
+                                resultCallback = { key ->
+                                    when (key) {
+                                        "archived" -> navigateTo(screenFactory = { ArchivedScreen(it) })
+                                        "pairing" -> navigateTo(screenFactory = { PairingScreen(it) })
+                                    }
+                                },
+                            )
+                        },
+                    ),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
-                if (messages.isEmpty()) {
+                if (inbox.isEmpty()) {
                     EmptyBody(paired = keys != null, modifier = Modifier.weight(1f))
                 } else {
-                    LightScrollView(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(start = 1f.gridUnitsAsDp()),
-                    ) {
-                        messages.forEachIndexed { index, message ->
-                            MessageRow(message) {
-                                navigateTo(screenFactory = { MessageScreen(it, message.id) })
-                            }
-                            if (index != messages.lastIndex) Divider()
-                        }
-                        Spacer(modifier = Modifier.height(2f.gridUnitsAsDp()))
+                    ConversationList(inbox, modifier = Modifier.weight(1f)) { conversation ->
+                        navigateTo(screenFactory = { ConversationScreen(it, conversation.id) })
                     }
                 }
 
+                // Pairing is a one-time setup: a bottom-bar action until it's done; after that it's in the gear.
                 LightBottomBar(
-                    items = buildList {
-                        if (messages.isNotEmpty()) {
-                            add(LightBarButton.Text(text = "History", onClick = { navigateTo(screenFactory = { HistoryScreen(it) }) }))
-                        }
-                        add(
-                            LightBarButton.Text(
-                                text = if (keys == null) "Pair" else "Pairing",
-                                onClick = { navigateTo(screenFactory = { PairingScreen(it) }) },
-                            ),
+                    items = if (keys == null) {
+                        listOf(LightBarButton.Text(text = "Pair", onClick = { navigateTo(screenFactory = { PairingScreen(it) }) }))
+                    } else {
+                        // Compose on the right, as in Messages.
+                        listOf(
+                            null,
+                            null,
+                            LightBarButton.LightIcon(icon = LightIcons.COMPOSE_MESSAGE, onClick = {
+                                navigateTo(
+                                    screenFactory = {
+                                        TextEditorScreen(it, EditorRequest(title = "New conversation", initialValue = "", initialCaps = true))
+                                    },
+                                    resultCallback = { text ->
+                                        if (text.isNotBlank()) viewModel.startConversation(lightContext, text)
+                                    },
+                                )
+                            }),
                         )
                     },
                 )
@@ -138,8 +170,30 @@ private fun EmptyBody(paired: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
+/** Conversations as inbox rows, divided. Shared by the inbox and Archived. */
 @Composable
-private fun MessageRow(message: RelayMessage, onClick: () -> Unit) {
+internal fun ConversationList(conversations: List<Conversation>, modifier: Modifier = Modifier, onOpen: (Conversation) -> Unit) {
+    LightScrollView(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 1f.gridUnitsAsDp()),
+    ) {
+        conversations.forEachIndexed { index, conversation ->
+            ConversationRow(conversation) { onOpen(conversation) }
+            if (index != conversations.lastIndex) Divider()
+        }
+        Spacer(modifier = Modifier.height(2f.gridUnitsAsDp()))
+    }
+}
+
+/**
+ * A conversation: its first headline as the title, then where it has got to (the
+ * latest message, or the detail while there's only one), then the last activity.
+ */
+@Composable
+private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
+    val first = conversation.messages.first()
+    val latest = conversation.latest
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -147,15 +201,22 @@ private fun MessageRow(message: RelayMessage, onClick: () -> Unit) {
             .padding(vertical = 0.75f.gridUnitsAsDp()),
     ) {
         LightText(
-            text = if (message.read) message.headline else "• ${message.headline}",
+            // Unread is an asterisk before the title, as in LightOS Messages.
+            text = if (conversation.unread) "*${first.headline}" else first.headline,
             variant = LightTextVariant.Copy,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
-        if (message.detail.isNotBlank()) {
+        val summary = when {
+            latest !== first -> latest.headline
+            // What you wrote, unless it's only the title again.
+            first.mine -> first.replies.lastOrNull()?.text.orEmpty().takeIf { it.trim() != first.headline }.orEmpty()
+            else -> first.detail
+        }
+        if (summary.isNotBlank()) {
             LightText(
-                text = message.detail,
+                text = summary,
                 variant = LightTextVariant.Detail,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -165,9 +226,18 @@ private fun MessageRow(message: RelayMessage, onClick: () -> Unit) {
             )
         }
         val meta = listOfNotNull(
-            formatTime(message.receivedAt),
-            message.replies.lastOrNull()?.label(),
-            if (message.replies.isEmpty() && message.choices.isNotEmpty()) "needs an answer" else null,
+            formatTime(conversation.lastActivity),
+            when {
+                conversation.needsAnswer -> "needs an answer"
+                // Yours and not answered yet: the summary already shows what you wrote.
+                latest.mine -> when (conversation.lastReply?.state) {
+                    ReplyState.Pending -> "sending"
+                    ReplyState.Failed -> "not sent"
+                    else -> "waiting for a reply"
+                }
+                else -> conversation.lastReply?.label()
+            },
+            conversation.messages.size.takeIf { it > 1 }?.let { "$it messages" },
         ).joinToString(" · ")
         LightText(
             text = meta,

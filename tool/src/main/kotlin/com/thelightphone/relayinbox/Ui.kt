@@ -30,30 +30,38 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 
-private val timeOfDay = DateTimeFormatter.ofPattern("H:mm", Locale.getDefault())
-private val dayAndTime = DateTimeFormatter.ofPattern("EEE H:mm", Locale.getDefault())
+private val timeOfDay = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(Locale.getDefault())
+private val weekday = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
 private val date = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
 
-/** "9:40" today, "Mon 9:40" this week, "Sep 3" before that. */
+/** "9:40 AM" today, "Mon 9:40 AM" this week, "Sep 3" before that, in the phone's locale. */
+/** "Oct 4 4:47 PM", the way LightOS Messages dates each message. */
+internal fun formatDateTime(epochMillis: Long): String {
+    val at = Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault())
+    return "${date.format(at)} ${timeOfDay.format(at)}"
+}
+
 internal fun formatTime(epochMillis: Long): String {
     val zone = ZoneId.systemDefault()
     val at = Instant.ofEpochMilli(epochMillis).atZone(zone)
     val today = LocalDate.now(zone)
     return when {
         at.toLocalDate() == today -> timeOfDay.format(at)
-        at.toLocalDate().isAfter(today.minusDays(6)) -> dayAndTime.format(at)
+        at.toLocalDate().isAfter(today.minusDays(6)) -> "${weekday.format(at)} ${timeOfDay.format(at)}"
         else -> date.format(at)
     }
 }
 
+/** "You: Yes" for an inbox row, plus how it's going until it has reached the relay. */
 internal fun Reply.label(): String {
     val what = choice ?: "“${text.orEmpty().take(40)}”"
     return when (state) {
-        ReplyState.Pending -> "$what · sending"
-        ReplyState.Sent -> "$what · sent"
-        ReplyState.Failed -> "$what · not sent"
+        ReplyState.Pending -> "You: $what · sending"
+        ReplyState.Sent -> "You: $what"
+        ReplyState.Failed -> "You: $what · not sent"
     }
 }
 
