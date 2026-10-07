@@ -16,7 +16,7 @@ agent. Light's push server accepts pushes, but they don't reach the tool yet; se
 
 - **Inbox:** one row per conversation, most recently active first. Each row shows the
   conversation's title (its first headline), where it has got to, the last activity
-  and how many messages it has. `•` marks unread ones, and a conversation with a
+  and how many messages it has. An asterisk before the title marks unread ones, as in Messages, and a conversation with a
   choice still to make says so. The compose button (bottom right) starts a
   conversation: type it, and the first line becomes the title.
 - **Conversation:** laid out like LightOS Messages, titled with the conversation and

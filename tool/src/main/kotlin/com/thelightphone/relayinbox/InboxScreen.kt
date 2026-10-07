@@ -201,7 +201,8 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
             .padding(vertical = 0.75f.gridUnitsAsDp()),
     ) {
         LightText(
-            text = if (conversation.unread) "• ${first.headline}" else first.headline,
+            // Unread is an asterisk before the title, as in LightOS Messages.
+            text = if (conversation.unread) "*${first.headline}" else first.headline,
             variant = LightTextVariant.Copy,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
