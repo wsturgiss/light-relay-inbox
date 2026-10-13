@@ -183,11 +183,12 @@ class ConversationScreen(
                 }
 
                 val hasFailed = conversation?.messages?.any { m -> m.replies.any { it.state == ReplyState.Failed } } == true
-                // Left, centre, right, as in Messages: compose on the right, Retry in the middle when needed.
+                // Voice note and photo on the left, compose on the right as in Messages; Retry
+                // between them when needed (an icon: a text button would cap the bar at 3).
+                val latest = conversation?.latest?.takeIf { canReply }
                 LightBottomBar(
-                    items = listOf(
-                        if (conversation != null && canReply) {
-                            val latest = conversation.latest
+                    items = listOfNotNull(
+                        latest?.let {
                             LightBarButton.LightIcon(icon = LightIcons.MICROPHONE, onClick = {
                                 navigateTo(
                                     screenFactory = { VoiceNoteScreen(it) },
@@ -196,12 +197,23 @@ class ConversationScreen(
                                     },
                                 )
                             })
+                        },
+                        latest?.let {
+                            LightBarButton.LightIcon(icon = LightIcons.CAMERA, onClick = {
+                                navigateTo(
+                                    screenFactory = { PhotoScreen(it) },
+                                    resultCallback = { photo ->
+                                        if (photo != null) viewModel.reply(lightContext, latest.id, attachments = listOf(photo))
+                                    },
+                                )
+                            })
+                        },
+                        if (hasFailed && canReply) {
+                            LightBarButton.LightIcon(icon = LightIcons.REFRESH, onClick = { viewModel.retry(lightContext) }, contentDescription = "Retry")
                         } else {
                             null
                         },
-                        if (hasFailed && canReply) LightBarButton.Text(text = "Retry", onClick = { viewModel.retry(lightContext) }) else null,
-                        if (conversation != null && canReply) {
-                            val latest = conversation.latest
+                        latest?.let {
                             LightBarButton.LightIcon(icon = LightIcons.COMPOSE_MESSAGE, onClick = {
                                 navigateTo(
                                     screenFactory = { TextEditorScreen(it, EditorRequest(title = "Reply", initialValue = "", initialCaps = true)) },
@@ -210,8 +222,6 @@ class ConversationScreen(
                                     },
                                 )
                             })
-                        } else {
-                            null
                         },
                     ),
                 )
@@ -281,6 +291,10 @@ private fun YourEntry(reply: Reply) {
     ) {
         LightText(text = formatDateTime(reply.at) + state, variant = LightTextVariant.Detail)
         (reply.choice ?: reply.text)?.let { LightText(text = it, variant = LightTextVariant.Paragraph) }
-        reply.attachments.forEach { LightText(text = "[${it.label()}]", variant = LightTextVariant.Paragraph) }
+        reply.attachments.forEach { attachment ->
+            LightText(text = "[${attachment.label()}]", variant = LightTextVariant.Paragraph)
+            attachment.transcript?.takeIf { it.isNotBlank() }?.let { LightText(text = it, variant = LightTextVariant.Paragraph) }
+            attachment.transcriptError?.let { LightText(text = it, variant = LightTextVariant.Detail, lighten = true) }
+        }
     }
 }
