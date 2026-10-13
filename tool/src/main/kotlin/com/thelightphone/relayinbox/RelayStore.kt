@@ -20,6 +20,8 @@ data class RelayMessage(
      * what you wrote before the agent answered.
      */
     val mine: Boolean = false,
+    /** For a conversation you started: the agent you picked under To, if the inbox offered any. */
+    val to: String? = null,
     /** When the relay sent it, ISO-8601 UTC, as the relay stamped it. */
     val sentAt: String = "",
     /** When the phone received it, epoch millis. Fetched history uses [sentAt] instead. */
@@ -122,6 +124,15 @@ data class Attachment(
 @Serializable
 enum class ReplyState { Pending, Sent, Failed }
 
+/** Who a new conversation can go to, from the inbox's `GET /agents`; the default first. */
+internal object Agents : JsonFileState<List<String>>(
+    fileName = "agents.json",
+    serializer = ListSerializer(String.serializer()),
+    empty = emptyList(),
+) {
+    suspend fun set(names: List<String>) = update { names }
+}
+
 /** The conversation, newest first. Kept as long as the relay keeps it. */
 internal object RelayStore : JsonFileState<List<RelayMessage>>(
     fileName = "messages.json",
@@ -150,12 +161,13 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
     suspend fun mergeReplies(fromInbox: List<InboxReply>) = update { withInboxReplies(it, fromInbox) }
 
     /** Starts a conversation from the phone: [text]'s first line is the title. Returns its reply, queued to send. */
-    suspend fun startConversation(text: String, now: Long = System.currentTimeMillis()): RelayMessage {
+    suspend fun startConversation(text: String, to: String? = null, now: Long = System.currentTimeMillis()): RelayMessage {
         val (title, _) = splitTitle(text)
         val message = RelayMessage(
             id = "t_" + randomHex(8),
             headline = title,
             mine = true,
+            to = to,
             receivedAt = now,
             read = true,
             replies = listOf(Reply(id = "r_" + randomHex(8), text = text, at = now)),
@@ -220,7 +232,7 @@ internal fun withInboxReplies(list: List<RelayMessage>, fromInbox: List<InboxRep
     val restoredStarts = fromInbox
         .filter { it.messageId == null && it.thread != null && it.title != null && list.none { m -> m.id == it.thread } }
         .distinctBy { it.thread }
-        .map { RelayMessage(id = it.thread!!, headline = it.title!!, mine = true, receivedAt = it.sentAtMillis(), read = true) }
+        .map { RelayMessage(id = it.thread!!, headline = it.title!!, mine = true, to = it.to, receivedAt = it.sentAtMillis(), read = true) }
     return (list + restoredStarts).map { m ->
         val incoming = byMessage[m.id].orEmpty()
         if (incoming.isEmpty()) return@map m
@@ -267,6 +279,8 @@ data class InboxReply(
     val text: String? = null,
     val sentAt: String? = null,
     val receivedAt: String = "",
+    /** On a conversation you started: who it was for. */
+    val to: String? = null,
     val attachments: List<InboxAttachment> = emptyList(),
 ) {
     fun sentAtMillis(): Long = parseInstant(sentAt) ?: parseInstant(receivedAt) ?: 0

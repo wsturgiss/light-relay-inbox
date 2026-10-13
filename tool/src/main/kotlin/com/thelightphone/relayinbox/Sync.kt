@@ -63,6 +63,9 @@ internal data class MessagesPage(val messages: List<FetchedMessage> = emptyList(
 internal data class RepliesPage(val replies: List<InboxReply> = emptyList())
 
 @Serializable
+internal data class AgentsPage(val agents: List<String> = emptyList())
+
+@Serializable
 internal data class FetchedTranscript(val seq: Long, val id: String, val text: String = "", val error: String? = null)
 
 @Serializable
@@ -106,6 +109,7 @@ internal suspend fun syncOnce(filesDir: File): SyncOutcome {
             fetchMessages(url, keys, bearer)
             fetchReplies(url, bearer)
             fetchTranscripts(url, bearer)
+            fetchAgents(url, bearer)
         }
         SyncOutcome.Done
     } catch (e: IOException) {
@@ -188,6 +192,16 @@ private suspend fun fetchReplies(replyUrl: String, token: String) {
         SyncCursor.repliesUpTo(page.last().seq)
         if (page.size < PAGE) return
     }
+}
+
+/** Who a new conversation can go to. An inbox from before agents (404) leaves the list as it was. */
+private suspend fun fetchAgents(replyUrl: String, token: String) {
+    val body = try {
+        get(inboxRoute(replyUrl, "/agents"), token)
+    } catch (e: Refused) {
+        if (e.status == 404) return else throw e
+    }
+    Agents.set(json.decodeFromString(AgentsPage.serializer(), body).agents)
 }
 
 /** Voice notes' text, which the inbox adds a few seconds after the reply. */

@@ -85,12 +85,13 @@ class SyncTest {
     @Test
     fun `a conversation you started comes back after a reinstall, with the agent's answer under it`() {
         val start = InboxReply(seq = 9, id = "r9", thread = "t_8c1f0a2b3d4e5f60", title = "Plan Saturday",
-            text = "Plan Saturday\nHike or the market?", sentAt = "2026-10-01T09:30:00Z")
+            text = "Plan Saturday\nHike or the market?", sentAt = "2026-10-01T09:30:00Z", to = "Huginn")
         val answer = message("m4", 1_790_847_100_000).copy(thread = "t_8c1f0a2b3d4e5f60", headline = "Hike")
         val restored = withInboxReplies(listOf(answer), listOf(start))
         val root = assertNotNull(restored.firstOrNull { it.id == "t_8c1f0a2b3d4e5f60" })
         assertTrue(root.mine)
         assertEquals("Plan Saturday", root.headline)
+        assertEquals("Huginn", root.to)
         assertEquals(listOf("r9"), root.replies.map { it.id })
         assertEquals(ReplyState.Sent, root.replies.single().state)
 
@@ -109,5 +110,10 @@ class SyncTest {
             message("m2", 40).copy(thread = "m1"),
         )).single()
         assertTrue(!busier.isArchived(mapOf("m1" to 30)))
+    }
+
+    @Test
+    fun `the agents list reads as the inbox sends it`() {
+        assertEquals(listOf("Huginn", "Claude"), json.decodeFromString(AgentsPage.serializer(), """{"agents": ["Huginn", "Claude"]}""").agents)
     }
 }
