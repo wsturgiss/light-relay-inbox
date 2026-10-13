@@ -3,6 +3,7 @@ package com.thelightphone.relayinbox
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,10 +23,13 @@ import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SealedLightContext
+import com.thelightphone.sdk.SimpleLightScreen
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
+import java.io.File
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
@@ -38,7 +42,15 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
-class InboxViewModel : LightViewModel<Unit>() {
+class InboxViewModel(filesDir: File) : LightViewModel<Unit>() {
+    private val refresh = LiveRefresh(viewModelScope, filesDir)
+
+    override fun onScreenShow(screen: SimpleLightScreen<Unit>) = refresh.start()
+
+    override fun onScreenHide(screen: SimpleLightScreen<Unit>) = refresh.stop()
+
+    override fun onAppPause() = refresh.stop()
+
     fun startConversation(context: SealedLightContext, text: String) {
         viewModelScope.launch {
             RelayStore.startConversation(text)
@@ -55,7 +67,7 @@ class InboxScreen(
     override val viewModelClass: Class<InboxViewModel>
         get() = InboxViewModel::class.java
 
-    override fun createViewModel(): InboxViewModel = InboxViewModel()
+    override fun createViewModel(): InboxViewModel = InboxViewModel(lightContext.filesDir)
 
     @Composable
     override fun Content() {
@@ -186,6 +198,18 @@ internal fun ConversationList(conversations: List<Conversation>, modifier: Modif
     }
 }
 
+/** Who the conversation is waiting on, at the end of its title: a ring for you, dots for the agent. */
+@Composable
+private fun WaitingMark(waiting: Waiting) {
+    val modifier = Modifier.padding(start = 0.5f.gridUnitsAsDp(), end = 1f.gridUnitsAsDp())
+    when (waiting) {
+        Waiting.OnYou -> LightIcon(LightIcons.CIRCLE, modifier, size = 1f, contentDescription = "waiting on you")
+        // The dots are 26 by 7.
+        Waiting.OnAgent -> LightIcon(LightIcons.ELLIPSES, modifier, width = 1.25f, height = 0.35f,
+            contentDescription = "waiting on the agent")
+    }
+}
+
 /**
  * A conversation: its first headline as the title, then where it has got to (the
  * latest message, or the detail while there's only one), then the last activity.
@@ -200,14 +224,17 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
             .lightClickable(onClick = onClick)
             .padding(vertical = 0.75f.gridUnitsAsDp()),
     ) {
-        LightText(
-            // Unread is an asterisk before the title, as in LightOS Messages.
-            text = if (conversation.unread) "*${first.headline}" else first.headline,
-            variant = LightTextVariant.Copy,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            LightText(
+                // Unread is an asterisk before the title, as in LightOS Messages.
+                text = if (conversation.unread) "*${first.headline}" else first.headline,
+                variant = LightTextVariant.Copy,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            conversation.waiting?.let { WaitingMark(it) }
+        }
         val summary = when {
             latest !== first -> latest.headline
             // What you wrote, unless it's only the title again.
