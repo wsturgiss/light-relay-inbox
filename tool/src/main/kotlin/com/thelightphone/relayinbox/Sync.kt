@@ -38,7 +38,7 @@ internal fun scheduleSync(context: SealedLightContext) {
 
 /** How far through the relay's messages and the inbox's replies this phone has read. */
 @Serializable
-data class SyncState(val messages: Long = 0, val replies: Long = 0)
+data class SyncState(val messages: Long = 0, val replies: Long = 0, val transcripts: Long = 0)
 
 internal object SyncCursor : JsonFileState<SyncState>(
     fileName = "sync.json",
@@ -49,6 +49,8 @@ internal object SyncCursor : JsonFileState<SyncState>(
     suspend fun messagesUpTo(seq: Long) = update { it.copy(messages = maxOf(it.messages, seq)) }
 
     suspend fun repliesUpTo(seq: Long) = update { it.copy(replies = maxOf(it.replies, seq)) }
+
+    suspend fun transcriptsUpTo(seq: Long) = update { it.copy(transcripts = maxOf(it.transcripts, seq)) }
 }
 
 @Serializable
@@ -59,6 +61,12 @@ internal data class MessagesPage(val messages: List<FetchedMessage> = emptyList(
 
 @Serializable
 internal data class RepliesPage(val replies: List<InboxReply> = emptyList())
+
+@Serializable
+internal data class FetchedTranscript(val seq: Long, val id: String, val text: String = "", val error: String? = null)
+
+@Serializable
+internal data class TranscriptsPage(val transcripts: List<FetchedTranscript> = emptyList())
 
 /** The inbox's other routes sit beside `/replies`, which is what the build is given. */
 internal fun inboxRoute(replyUrl: String, route: String): String =
@@ -97,6 +105,7 @@ internal suspend fun syncOnce(filesDir: File): SyncOutcome {
         withContext(Dispatchers.IO) {
             fetchMessages(url, keys, bearer)
             fetchReplies(url, bearer)
+            fetchTranscripts(url, bearer)
         }
         SyncOutcome.Done
     } catch (e: IOException) {
@@ -177,6 +186,24 @@ private suspend fun fetchReplies(replyUrl: String, token: String) {
         if (page.isEmpty()) return
         RelayStore.mergeReplies(page)
         SyncCursor.repliesUpTo(page.last().seq)
+        if (page.size < PAGE) return
+    }
+}
+
+/** Voice notes' text, which the inbox adds a few seconds after the reply. */
+private suspend fun fetchTranscripts(replyUrl: String, token: String) {
+    while (true) {
+        val after = SyncCursor.state.value.transcripts
+        val body = try {
+            get(inboxRoute(replyUrl, "/transcripts?after=$after&limit=$PAGE"), token)
+        } catch (e: Refused) {
+            // An inbox from before transcripts.
+            if (e.status == 404) return else throw e
+        }
+        val page = json.decodeFromString(TranscriptsPage.serializer(), body).transcripts
+        if (page.isEmpty()) return
+        RelayStore.addTranscripts(page)
+        SyncCursor.transcriptsUpTo(page.last().seq)
         if (page.size < PAGE) return
     }
 }

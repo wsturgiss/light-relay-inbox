@@ -111,6 +111,10 @@ data class Attachment(
     val durationMs: Long? = null,
     val path: String? = null,
     val uploaded: Boolean = false,
+    /** A voice note's text, once the inbox has transcribed it. */
+    val transcript: String? = null,
+    /** Why the inbox couldn't transcribe it, such as "No transcription credit left". */
+    val transcriptError: String? = null,
 ) {
     val isVoice: Boolean get() = type.startsWith("audio/")
 }
@@ -179,6 +183,9 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
         r.copy(state = ReplyState.Sent, attachments = r.attachments.map { it.copy(path = null) })
     }
 
+    /** Voice notes' text, or why there is none, from the inbox. */
+    suspend fun addTranscripts(transcripts: List<FetchedTranscript>) = update { withTranscripts(it, transcripts) }
+
     private suspend fun updateReply(replyId: String, transform: (Reply) -> Reply) = update { list ->
         list.map { m ->
             if (m.replies.none { it.id == replyId }) m
@@ -222,9 +229,28 @@ internal fun withInboxReplies(list: List<RelayMessage>, fromInbox: List<InboxRep
         val updated = m.replies.map { if (it.id in stored && it.state != ReplyState.Sent) it.copy(state = ReplyState.Sent) else it }
         val restored = incoming.filter { it.id !in known }.map {
             Reply(id = it.id, choice = it.choice, text = it.text, at = it.sentAtMillis(), state = ReplyState.Sent,
-                attachments = it.attachments.map { a -> Attachment(id = a.id, type = a.type, bytes = a.bytes, uploaded = true) })
+                attachments = it.attachments.map { a ->
+                    Attachment(id = a.id, type = a.type, bytes = a.bytes, uploaded = true,
+                        transcript = a.transcript, transcriptError = a.transcriptError)
+                })
         }
         m.copy(read = m.read || restored.isNotEmpty(), replies = (updated + restored).sortedBy { it.at })
+    }
+}
+
+/**
+ * Puts each transcript, or its error, on its voice note, wherever that is. The later of two
+ * for one note wins: text after an error once the inbox retries. Unknown ids are skipped.
+ */
+internal fun withTranscripts(list: List<RelayMessage>, transcripts: List<FetchedTranscript>): List<RelayMessage> {
+    val byId = transcripts.associateBy { it.id }
+    return list.map { m ->
+        if (m.replies.none { r -> r.attachments.any { it.id in byId } }) m
+        else m.copy(replies = m.replies.map { r ->
+            r.copy(attachments = r.attachments.map { a ->
+                byId[a.id]?.let { t -> a.copy(transcript = t.text.takeIf { t.error == null }, transcriptError = t.error) } ?: a
+            })
+        })
     }
 }
 
@@ -247,7 +273,13 @@ data class InboxReply(
 }
 
 @Serializable
-data class InboxAttachment(val id: String, val type: String, val bytes: Long = 0)
+data class InboxAttachment(
+    val id: String,
+    val type: String,
+    val bytes: Long = 0,
+    val transcript: String? = null,
+    val transcriptError: String? = null,
+)
 
 /**
  * A conversation's title is the first line you wrote. A single line is its own title,

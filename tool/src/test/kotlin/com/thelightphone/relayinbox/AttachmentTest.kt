@@ -41,4 +41,43 @@ class AttachmentTest {
         assertEquals("You: “Which one?”", captioned.label())
         assertEquals("You: Photo · sending", Reply(id = "r2", at = 1, attachments = listOf(photo)).label())
     }
+
+    @Test
+    fun `a transcript lands on its voice note`() {
+        val note = Attachment(id = "a_1", type = "audio/mp4", durationMs = 4_000, uploaded = true)
+        val message = RelayMessage(id = "m1", headline = "Hi", receivedAt = 1,
+            replies = listOf(Reply(id = "r1", at = 2, state = ReplyState.Sent, attachments = listOf(note))))
+        val page = """{"transcripts": [{"seq": 1, "id": "a_1", "text": "Pick up milk."}, {"seq": 2, "id": "a_gone", "text": "x"}]}"""
+        val transcripts = json.decodeFromString(TranscriptsPage.serializer(), page).transcripts
+        val reply = withTranscripts(listOf(message), transcripts).single().replies.single()
+        assertEquals("Pick up milk.", reply.attachments.single().transcript)
+        assertEquals("You: “Pick up milk.”", reply.label())
+    }
+
+    @Test
+    fun `an error shows until the transcript replaces it`() {
+        val note = Attachment(id = "a_1", type = "audio/mp4", uploaded = true)
+        val message = RelayMessage(id = "m1", headline = "Hi", receivedAt = 1,
+            replies = listOf(Reply(id = "r1", at = 2, state = ReplyState.Sent, attachments = listOf(note))))
+        val failed = json.decodeFromString(TranscriptsPage.serializer(),
+            """{"transcripts": [{"seq": 1, "id": "a_1", "text": "", "error": "No transcription credit left"}]}""").transcripts
+        val withError = withTranscripts(listOf(message), failed)
+        val errored = withError.single().replies.single().attachments.single()
+        assertEquals("No transcription credit left", errored.transcriptError)
+        assertNull(errored.transcript)
+        val later = listOf(FetchedTranscript(seq = 2, id = "a_1", text = "Pick up milk."))
+        val fixed = withTranscripts(withError, later).single().replies.single().attachments.single()
+        assertEquals("Pick up milk.", fixed.transcript)
+        assertNull(fixed.transcriptError)
+    }
+
+    @Test
+    fun `history brings transcripts back`() {
+        val page = """{"replies": [{"seq": 3, "id": "r_v1", "messageId": "m1", "sentAt": "2026-10-13T12:54:29Z",
+            "attachments": [{"id": "a_1", "type": "audio/mp4", "bytes": 10, "transcript": "Pick up milk."}]}]}"""
+        val replies = json.decodeFromString(RepliesPage.serializer(), page).replies
+        val message = RelayMessage(id = "m1", headline = "Hi", receivedAt = 1)
+        val restored = withInboxReplies(listOf(message), replies).single().replies.single()
+        assertEquals("Pick up milk.", restored.attachments.single().transcript)
+    }
 }
