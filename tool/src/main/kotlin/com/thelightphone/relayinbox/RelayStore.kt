@@ -42,7 +42,25 @@ data class Conversation(val id: String, val messages: List<RelayMessage>) {
     val unread: Boolean get() = messages.any { !it.read }
     val needsAnswer: Boolean get() = messages.any { it.needsAnswer }
     val lastReply: Reply? get() = messages.flatMap { it.replies }.maxByOrNull { it.at }
+
+    /**
+     * Who this conversation is waiting on, if anyone. On the agent when the last word is
+     * yours (sent or still sending; a failed one is yours to resend). On you when the
+     * agent offered choices you haven't answered.
+     */
+    val waiting: Waiting?
+        get() {
+            val reply = lastReply
+            val fromAgent = messages.filterNot { it.mine }.maxOfOrNull { it.receivedAt } ?: 0
+            return when {
+                reply != null && reply.state != ReplyState.Failed && reply.at > fromAgent -> Waiting.OnAgent
+                needsAnswer -> Waiting.OnYou
+                else -> null
+            }
+        }
 }
+
+enum class Waiting { OnYou, OnAgent }
 
 /**
  * Conversations you've archived, by id, with when. Kept on this phone only. A conversation
