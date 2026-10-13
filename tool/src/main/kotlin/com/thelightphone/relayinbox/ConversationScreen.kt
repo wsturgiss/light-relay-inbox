@@ -47,10 +47,19 @@ class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
 
     override fun onAppPause() = refresh.stop()
 
-    fun reply(context: SealedLightContext, messageId: String, choice: String? = null, text: String? = null) {
+    fun reply(
+        context: SealedLightContext,
+        messageId: String,
+        choice: String? = null,
+        text: String? = null,
+        attachments: List<Attachment> = emptyList(),
+    ) {
         viewModelScope.launch {
             val id = "r_" + randomHex(8)
-            RelayStore.addReply(messageId, Reply(id = id, choice = choice, text = text, at = System.currentTimeMillis()))
+            RelayStore.addReply(
+                messageId,
+                Reply(id = id, choice = choice, text = text, at = System.currentTimeMillis(), attachments = attachments),
+            )
             scheduleReplySend(context)
         }
     }
@@ -113,7 +122,6 @@ class ConversationScreen(
         }
 
         val canReply = keys != null && inboxUrl().isNotEmpty()
-
         LightTheme(colors = themeColors) {
             Column(
                 modifier = Modifier
@@ -178,7 +186,19 @@ class ConversationScreen(
                 // Left, centre, right, as in Messages: compose on the right, Retry in the middle when needed.
                 LightBottomBar(
                     items = listOf(
-                        null,
+                        if (conversation != null && canReply) {
+                            val latest = conversation.latest
+                            LightBarButton.LightIcon(icon = LightIcons.MICROPHONE, onClick = {
+                                navigateTo(
+                                    screenFactory = { VoiceNoteScreen(it) },
+                                    resultCallback = { note ->
+                                        if (note != null) viewModel.reply(lightContext, latest.id, attachments = listOf(note))
+                                    },
+                                )
+                            })
+                        } else {
+                            null
+                        },
                         if (hasFailed && canReply) LightBarButton.Text(text = "Retry", onClick = { viewModel.retry(lightContext) }) else null,
                         if (conversation != null && canReply) {
                             val latest = conversation.latest
@@ -260,6 +280,7 @@ private fun YourEntry(reply: Reply) {
         horizontalAlignment = Alignment.End,
     ) {
         LightText(text = formatDateTime(reply.at) + state, variant = LightTextVariant.Detail)
-        LightText(text = reply.choice ?: reply.text.orEmpty(), variant = LightTextVariant.Paragraph)
+        (reply.choice ?: reply.text)?.let { LightText(text = it, variant = LightTextVariant.Paragraph) }
+        reply.attachments.forEach { LightText(text = "[${it.label()}]", variant = LightTextVariant.Paragraph) }
     }
 }

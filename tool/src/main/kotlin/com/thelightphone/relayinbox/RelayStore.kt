@@ -94,7 +94,26 @@ data class Reply(
     val text: String? = null,
     val at: Long,
     val state: ReplyState = ReplyState.Pending,
+    val attachments: List<Attachment> = emptyList(),
 )
+
+/**
+ * A voice note or photo sent with a reply. The file waits in [path] until the reply is
+ * sent, then goes; history fetched from the inbox never had one here.
+ */
+@Serializable
+data class Attachment(
+    /** `a_` and 16 hex digits. Chosen here, so an upload can be retried. */
+    val id: String,
+    /** `audio/mp4` or `image/jpeg`. */
+    val type: String,
+    val bytes: Long = 0,
+    val durationMs: Long? = null,
+    val path: String? = null,
+    val uploaded: Boolean = false,
+) {
+    val isVoice: Boolean get() = type.startsWith("audio/")
+}
 
 @Serializable
 enum class ReplyState { Pending, Sent, Failed }
@@ -148,10 +167,22 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
     suspend fun addReply(messageId: String, reply: Reply) =
         updateMessage(messageId) { it.copy(replies = it.replies + reply) }
 
-    suspend fun setReplyState(replyId: String, state: ReplyState) = update { list ->
+    suspend fun setReplyState(replyId: String, state: ReplyState) = updateReply(replyId) { it.copy(state = state) }
+
+    suspend fun markUploaded(replyId: String, attachmentId: String) = updateReply(replyId) { r ->
+        r.copy(attachments = r.attachments.map { if (it.id == attachmentId) it.copy(uploaded = true) else it })
+    }
+
+    /** Sent: the inbox has the files, so this phone lets them go. */
+    suspend fun replySent(replyId: String) = updateReply(replyId) { r ->
+        r.attachments.forEach { a -> a.path?.let { java.io.File(it).delete() } }
+        r.copy(state = ReplyState.Sent, attachments = r.attachments.map { it.copy(path = null) })
+    }
+
+    private suspend fun updateReply(replyId: String, transform: (Reply) -> Reply) = update { list ->
         list.map { m ->
             if (m.replies.none { it.id == replyId }) m
-            else m.copy(replies = m.replies.map { if (it.id == replyId) it.copy(state = state) else it })
+            else m.copy(replies = m.replies.map { if (it.id == replyId) transform(it) else it })
         }
     }
 
@@ -190,7 +221,8 @@ internal fun withInboxReplies(list: List<RelayMessage>, fromInbox: List<InboxRep
         val known = m.replies.map { it.id }.toSet()
         val updated = m.replies.map { if (it.id in stored && it.state != ReplyState.Sent) it.copy(state = ReplyState.Sent) else it }
         val restored = incoming.filter { it.id !in known }.map {
-            Reply(id = it.id, choice = it.choice, text = it.text, at = it.sentAtMillis(), state = ReplyState.Sent)
+            Reply(id = it.id, choice = it.choice, text = it.text, at = it.sentAtMillis(), state = ReplyState.Sent,
+                attachments = it.attachments.map { a -> Attachment(id = a.id, type = a.type, bytes = a.bytes, uploaded = true) })
         }
         m.copy(read = m.read || restored.isNotEmpty(), replies = (updated + restored).sortedBy { it.at })
     }
@@ -209,9 +241,13 @@ data class InboxReply(
     val text: String? = null,
     val sentAt: String? = null,
     val receivedAt: String = "",
+    val attachments: List<InboxAttachment> = emptyList(),
 ) {
     fun sentAtMillis(): Long = parseInstant(sentAt) ?: parseInstant(receivedAt) ?: 0
 }
+
+@Serializable
+data class InboxAttachment(val id: String, val type: String, val bytes: Long = 0)
 
 /**
  * A conversation's title is the first line you wrote. A single line is its own title,
