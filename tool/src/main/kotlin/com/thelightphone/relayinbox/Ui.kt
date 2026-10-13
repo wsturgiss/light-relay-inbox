@@ -57,7 +57,7 @@ internal fun formatTime(epochMillis: Long): String {
 
 /** "You: Yes" for an inbox row, plus how it's going until it has reached the relay. */
 internal fun Reply.label(): String {
-    val what = choice ?: "“${text.orEmpty().take(40)}”"
+    val what = choice ?: text?.let { "“${it.take(40)}”" } ?: attachments.joinToString { it.label() }
     return when (state) {
         ReplyState.Pending -> "You: $what · sending"
         ReplyState.Sent -> "You: $what"
