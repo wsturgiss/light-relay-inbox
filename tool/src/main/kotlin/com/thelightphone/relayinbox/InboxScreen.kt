@@ -23,8 +23,10 @@ import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SealedLightContext
+import com.thelightphone.sdk.SimpleLightScreen
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
+import java.io.File
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcon
@@ -40,7 +42,15 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
-class InboxViewModel : LightViewModel<Unit>() {
+class InboxViewModel(filesDir: File) : LightViewModel<Unit>() {
+    private val refresh = LiveRefresh(viewModelScope, filesDir)
+
+    override fun onScreenShow(screen: SimpleLightScreen<Unit>) = refresh.start()
+
+    override fun onScreenHide(screen: SimpleLightScreen<Unit>) = refresh.stop()
+
+    override fun onAppPause() = refresh.stop()
+
     fun startConversation(context: SealedLightContext, text: String) {
         viewModelScope.launch {
             RelayStore.startConversation(text)
@@ -57,7 +67,7 @@ class InboxScreen(
     override val viewModelClass: Class<InboxViewModel>
         get() = InboxViewModel::class.java
 
-    override fun createViewModel(): InboxViewModel = InboxViewModel()
+    override fun createViewModel(): InboxViewModel = InboxViewModel(lightContext.filesDir)
 
     @Composable
     override fun Content() {
