@@ -6,13 +6,20 @@ import com.thelightphone.sdk.LightJobHandler
 import com.thelightphone.sdk.LightJobResult
 import com.thelightphone.sdk.LightWork
 import com.thelightphone.sdk.SealedLightContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 internal const val SYNC_JOB = "sync"
 
@@ -64,26 +71,64 @@ internal fun inboxRoute(replyUrl: String, route: String): String =
  */
 @LightJob("sync")
 val sync: LightJobHandler = { ctx, _ ->
-    openStores(ctx.filesDir)
+    when (syncOnce(ctx.filesDir)) {
+        SyncOutcome.Done -> LightJobResult.Success()
+        SyncOutcome.TryAgain -> LightJobResult.Retry
+        SyncOutcome.CantSync -> LightJobResult.Error()
+    }
+}
+
+internal enum class SyncOutcome { Done, TryAgain, CantSync }
+
+/** One fetch of messages and replies. The job runs it, and so does an open screen. */
+internal suspend fun syncOnce(filesDir: File): SyncOutcome {
+    openStores(filesDir)
     val keys = Pairing.keys.value
     val url = inboxUrl()
     if (keys == null || url.isEmpty()) {
         Log.w(TAG, "Can't sync: ${if (keys == null) "not paired" else "relay.inboxUrl not set"}")
-        LightJobResult.Error()
-    } else {
-        try {
-            withContext(Dispatchers.IO) {
-                fetchMessages(url, keys)
-                fetchReplies(url, keys.replyToken)
-            }
-            LightJobResult.Success()
-        } catch (e: IOException) {
-            Log.w(TAG, "Sync not finished: $e")
-            LightJobResult.Retry
-        } catch (e: Refused) {
-            Log.w(TAG, "Sync refused: ${e.message}")
-            if (e.status == 429 || e.status >= 500) LightJobResult.Retry else LightJobResult.Error()
+        return SyncOutcome.CantSync
+    }
+    return try {
+        withContext(Dispatchers.IO) {
+            fetchMessages(url, keys)
+            fetchReplies(url, keys.replyToken)
         }
+        SyncOutcome.Done
+    } catch (e: IOException) {
+        Log.w(TAG, "Sync not finished: $e")
+        SyncOutcome.TryAgain
+    } catch (e: Refused) {
+        Log.w(TAG, "Sync refused: ${e.message}")
+        if (e.status == 429 || e.status >= 500) SyncOutcome.TryAgain else SyncOutcome.CantSync
+    }
+}
+
+/** How often an open screen checks in. Two small requests each time; the inbox allows 20 a minute. */
+private val LIVE_REFRESH = 20.seconds
+
+/**
+ * Checks for new messages every [LIVE_REFRESH] while a screen is on show, so a reply
+ * turns up in an open conversation without leaving it. Start it from `onScreenShow`
+ * (which also runs when the tool comes back to the front) and stop it from
+ * `onScreenHide` and `onAppPause`; the 15-minute job covers the rest.
+ */
+internal class LiveRefresh(private val scope: CoroutineScope, private val filesDir: File) {
+    private var job: Job? = null
+
+    fun start() {
+        if (job?.isActive == true) return
+        job = scope.launch {
+            while (isActive) {
+                if (syncOnce(filesDir) == SyncOutcome.CantSync) return@launch
+                delay(LIVE_REFRESH)
+            }
+        }
+    }
+
+    fun stop() {
+        job?.cancel()
+        job = null
     }
 }
 

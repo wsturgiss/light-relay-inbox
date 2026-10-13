@@ -22,6 +22,7 @@ import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SealedLightContext
+import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcons
@@ -35,8 +36,17 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import kotlinx.coroutines.launch
+import java.io.File
 
-class ConversationViewModel : LightViewModel<Unit>() {
+class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
+    private val refresh = LiveRefresh(viewModelScope, filesDir)
+
+    override fun onScreenShow(screen: SimpleLightScreen<Unit>) = refresh.start()
+
+    override fun onScreenHide(screen: SimpleLightScreen<Unit>) = refresh.stop()
+
+    override fun onAppPause() = refresh.stop()
+
     fun reply(context: SealedLightContext, messageId: String, choice: String? = null, text: String? = null) {
         viewModelScope.launch {
             val id = "r_" + randomHex(8)
@@ -80,7 +90,7 @@ class ConversationScreen(
     override val viewModelClass: Class<ConversationViewModel>
         get() = ConversationViewModel::class.java
 
-    override fun createViewModel(): ConversationViewModel = ConversationViewModel()
+    override fun createViewModel(): ConversationViewModel = ConversationViewModel(lightContext.filesDir)
 
     @Composable
     override fun Content() {
