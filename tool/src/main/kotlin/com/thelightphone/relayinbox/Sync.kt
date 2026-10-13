@@ -75,10 +75,12 @@ val sync: LightJobHandler = { ctx, _ ->
         SyncOutcome.Done -> LightJobResult.Success()
         SyncOutcome.TryAgain -> LightJobResult.Retry
         SyncOutcome.CantSync -> LightJobResult.Error()
+        // Away from home without a session: the next periodic run tries the LAN again.
+        SyncOutcome.NeedsHome -> LightJobResult.Success()
     }
 }
 
-internal enum class SyncOutcome { Done, TryAgain, CantSync }
+internal enum class SyncOutcome { Done, TryAgain, CantSync, NeedsHome }
 
 /** One fetch of messages and replies. The job runs it, and so does an open screen. */
 internal suspend fun syncOnce(filesDir: File): SyncOutcome {
@@ -89,10 +91,12 @@ internal suspend fun syncOnce(filesDir: File): SyncOutcome {
         Log.w(TAG, "Can't sync: ${if (keys == null) "not paired" else "relay.inboxUrl not set"}")
         return SyncOutcome.CantSync
     }
+    Session.renewIfDue(keys.replyToken)
+    val bearer = inboxBearer(keys) ?: return SyncOutcome.NeedsHome
     return try {
         withContext(Dispatchers.IO) {
-            fetchMessages(url, keys)
-            fetchReplies(url, keys.replyToken)
+            fetchMessages(url, keys, bearer)
+            fetchReplies(url, bearer)
         }
         SyncOutcome.Done
     } catch (e: IOException) {
@@ -100,6 +104,10 @@ internal suspend fun syncOnce(filesDir: File): SyncOutcome {
         SyncOutcome.TryAgain
     } catch (e: Refused) {
         Log.w(TAG, "Sync refused: ${e.message}")
+        if (e.status == 401 && Session.enabled) {
+            Session.drop()
+            return SyncOutcome.NeedsHome
+        }
         if (e.status == 429 || e.status >= 500) SyncOutcome.TryAgain else SyncOutcome.CantSync
     }
 }
@@ -134,12 +142,12 @@ internal class LiveRefresh(private val scope: CoroutineScope, private val filesD
 
 private const val PAGE = 100
 
-private suspend fun fetchMessages(replyUrl: String, keys: PairingKeys) {
+private suspend fun fetchMessages(replyUrl: String, keys: PairingKeys, bearer: String) {
     while (true) {
         val after = SyncCursor.state.value.messages
         val page = json.decodeFromString(
             MessagesPage.serializer(),
-            get(inboxRoute(replyUrl, "/messages?after=$after&limit=$PAGE"), keys.replyToken),
+            get(inboxRoute(replyUrl, "/messages?after=$after&limit=$PAGE"), bearer),
         ).messages
         for (fetched in page) {
             val message = PushCodec.decode(fetched.body.toByteArray(), keys.pushKey)

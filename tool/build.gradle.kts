@@ -39,6 +39,10 @@ android {
         fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
         val inboxUrl = esc(localProperties.getProperty("relay.inboxUrl") ?: "")
         buildConfigField("String", "RELAY_INBOX_URL", "\"$inboxUrl\"")
+        // Short-lived sessions: the LAN-only door, e.g. https://192.168.1.20:18443, and the pin
+        // (SHA-256 of its certificate's public key, base64) that up.sh prints. Both or neither.
+        buildConfigField("String", "RELAY_SESSION_URL", "\"${esc(localProperties.getProperty("relay.sessionUrl") ?: "")}\"")
+        buildConfigField("String", "RELAY_SESSION_PIN", "\"${esc(localProperties.getProperty("relay.sessionPin") ?: "")}\"")
     }
 
     buildFeatures {

@@ -45,11 +45,17 @@ private data class ReplyBody(
 @LightJob("send-replies")
 val sendReplies: LightJobHandler = { ctx, _ ->
     openStores(ctx.filesDir)
-    val token = Pairing.keys.value?.replyToken
+    val keys = Pairing.keys.value
     val url = inboxUrl()
-    if (token == null || url.isEmpty()) {
-        Log.w(TAG, "Replies can't be sent: ${if (token == null) "not paired" else "relay.inboxUrl not set"}")
+    keys?.let { Session.renewIfDue(it.replyToken) }
+    val token = keys?.let(::inboxBearer)
+    if (keys == null || url.isEmpty()) {
+        Log.w(TAG, "Replies can't be sent: ${if (keys == null) "not paired" else "relay.inboxUrl not set"}")
         LightJobResult.Error()
+    } else if (token == null) {
+        // Sessions are on and this phone has none: replies wait until it's home.
+        Log.i(TAG, "Replies waiting for a session from the home network")
+        LightJobResult.Retry
     } else {
         var retry = false
         replies@ for ((message, reply) in RelayStore.pending()) {
@@ -69,6 +75,11 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                 }
                 when {
                     status in 200..299 -> RelayStore.markUploaded(reply.id, attachment.id)
+                    status == 401 && Session.enabled -> {
+                        Session.drop()
+                        retry = true
+                        continue@replies
+                    }
                     status == 429 || status >= 500 -> {
                         retry = true
                         continue@replies
@@ -103,6 +114,11 @@ val sendReplies: LightJobHandler = { ctx, _ ->
             }
             when {
                 status in 200..299 -> RelayStore.replySent(reply.id)
+                // The session ran out or the keys changed: not this reply's fault.
+                status == 401 && Session.enabled -> {
+                    Session.drop()
+                    retry = true
+                }
                 status == 429 || status >= 500 -> retry = true
                 else -> {
                     // 400/401/413: resending the same bytes won't help. Shown as failed, retryable by hand.

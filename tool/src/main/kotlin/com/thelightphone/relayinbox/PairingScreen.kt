@@ -45,7 +45,11 @@ class PairingViewModel : LightViewModel<Unit>() {
             return
         }
         _confirmingRotate.value = false
-        viewModelScope.launch { Pairing.rotate() }
+        viewModelScope.launch {
+            Pairing.rotate()
+            // A session from the old keys is dead on the relay; get a new one at home.
+            Session.drop()
+        }
     }
 }
 
@@ -69,6 +73,7 @@ class PairingScreen(
         val keys by Pairing.keys.collectAsState()
         val endpoint by Pairing.pushEndpoint.collectAsState(initial = null)
         val confirming by viewModel.confirmingRotate.collectAsState()
+        val session by Session.state.collectAsState()
 
         LaunchedEffect(Unit) {
             openStores(lightContext.filesDir)
@@ -100,6 +105,14 @@ class PairingScreen(
                 ) {
                     Status("Push", if (endpoint != null) "registered with LightOS" else "none yet; messages are fetched every 15 min")
                     Status("Reply inbox", inboxUrl().ifEmpty { "not set in this build" })
+                    if (Session.enabled) {
+                        Status(
+                            "Session",
+                            session?.takeIf { it.expiresAt > System.currentTimeMillis() }
+                                ?.let { "until ${formatDateTime(it.expiresAt)}; renews on the home network" }
+                                ?: "none; open the tool on the home network",
+                        )
+                    }
 
                     if (block != null) {
                         Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
