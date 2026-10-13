@@ -34,6 +34,7 @@ private data class ReplyBody(
     val text: String?,
     val sentAt: String,
     val attachments: List<String>,
+    val to: String? = null,
 )
 
 /**
@@ -103,6 +104,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                     text = reply.text,
                     sentAt = Instant.ofEpochMilli(reply.at).toString(),
                     attachments = reply.attachments.map { it.id },
+                    to = message.to.takeIf { message.mine },
                 ),
             )
             val status = try {

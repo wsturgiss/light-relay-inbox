@@ -51,9 +51,9 @@ class InboxViewModel(filesDir: File) : LightViewModel<Unit>() {
 
     override fun onAppPause() = refresh.stop()
 
-    fun startConversation(context: SealedLightContext, text: String) {
+    fun startConversation(context: SealedLightContext, text: String, to: String?) {
         viewModelScope.launch {
-            RelayStore.startConversation(text)
+            RelayStore.startConversation(text, to)
             scheduleReplySend(context)
         }
     }
@@ -133,14 +133,24 @@ class InboxScreen(
                             null,
                             null,
                             LightBarButton.LightIcon(icon = LightIcons.COMPOSE_MESSAGE, onClick = {
-                                navigateTo(
+                                fun write(to: String?) = navigateTo(
                                     screenFactory = {
-                                        TextEditorScreen(it, EditorRequest(title = "New conversation", initialValue = "", initialCaps = true))
+                                        TextEditorScreen(it, EditorRequest(title = to?.let { "To $it" } ?: "New conversation", initialValue = "", initialCaps = true))
                                     },
                                     resultCallback = { text ->
-                                        if (text.isNotBlank()) viewModel.startConversation(lightContext, text)
+                                        if (text.isNotBlank()) viewModel.startConversation(lightContext, text, to)
                                     },
                                 )
+                                // With a choice of agents, ask who it's for first; with one, it's theirs.
+                                val agents = Agents.state.value
+                                if (agents.size < 2) {
+                                    write(agents.firstOrNull())
+                                } else {
+                                    navigateTo(
+                                        screenFactory = { MenuScreen(it, "To", agents.map { name -> MenuItem(name, name) }) },
+                                        resultCallback = { name -> if (name != null) write(name) },
+                                    )
+                                }
                             }),
                         )
                     },
@@ -254,6 +264,7 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
         }
         val meta = listOfNotNull(
             formatTime(conversation.lastActivity),
+            first.to?.takeIf { first.mine }?.let { "to $it" },
             when {
                 conversation.needsAnswer -> "needs an answer"
                 // Yours and not answered yet: the summary already shows what you wrote.
