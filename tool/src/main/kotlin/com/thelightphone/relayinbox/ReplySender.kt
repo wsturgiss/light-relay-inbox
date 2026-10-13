@@ -9,6 +9,7 @@ import com.thelightphone.sdk.SealedLightContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -32,11 +33,14 @@ private data class ReplyBody(
     val choice: String?,
     val text: String?,
     val sentAt: String,
+    val attachments: List<String>,
 )
 
 /**
  * Posts pending replies to the public reply inbox. The reply's id makes a resend
  * harmless — the inbox stores each id once — so an unclear outcome is always retried.
+ * A reply's voice notes and photos go up first (`PUT /attachments/<id>`, just as
+ * retry-safe), and the reply names them.
  */
 @LightJob("send-replies")
 val sendReplies: LightJobHandler = { ctx, _ ->
@@ -48,7 +52,34 @@ val sendReplies: LightJobHandler = { ctx, _ ->
         LightJobResult.Error()
     } else {
         var retry = false
-        for ((message, reply) in RelayStore.pending()) {
+        replies@ for ((message, reply) in RelayStore.pending()) {
+            for (attachment in reply.attachments.filterNot { it.uploaded }) {
+                val file = attachment.path?.let(::File)?.takeIf { it.exists() }
+                if (file == null) {
+                    Log.w(TAG, "Reply ${reply.id}: ${attachment.id} is no longer on this phone")
+                    RelayStore.setReplyState(reply.id, ReplyState.Failed)
+                    continue@replies
+                }
+                val status = try {
+                    withContext(Dispatchers.IO) { upload(inboxRoute(url, "/attachments/${attachment.id}"), token, attachment.type, file) }
+                } catch (e: IOException) {
+                    Log.w(TAG, "${attachment.id} not uploaded yet: $e")
+                    retry = true
+                    continue@replies
+                }
+                when {
+                    status in 200..299 -> RelayStore.markUploaded(reply.id, attachment.id)
+                    status == 429 || status >= 500 -> {
+                        retry = true
+                        continue@replies
+                    }
+                    else -> {
+                        Log.w(TAG, "${attachment.id} refused with HTTP $status")
+                        RelayStore.setReplyState(reply.id, ReplyState.Failed)
+                        continue@replies
+                    }
+                }
+            }
             val body = json.encodeToString(
                 ReplyBody.serializer(),
                 ReplyBody(
@@ -60,6 +91,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                     choice = reply.choice,
                     text = reply.text,
                     sentAt = Instant.ofEpochMilli(reply.at).toString(),
+                    attachments = reply.attachments.map { it.id },
                 ),
             )
             val status = try {
@@ -70,7 +102,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                 continue
             }
             when {
-                status in 200..299 -> RelayStore.setReplyState(reply.id, ReplyState.Sent)
+                status in 200..299 -> RelayStore.replySent(reply.id)
                 status == 429 || status >= 500 -> retry = true
                 else -> {
                     // 400/401/413: resending the same bytes won't help. Shown as failed, retryable by hand.
@@ -80,6 +112,23 @@ val sendReplies: LightJobHandler = { ctx, _ ->
             }
         }
         if (retry) LightJobResult.Retry else LightJobResult.Success()
+    }
+}
+
+private fun upload(url: String, token: String, type: String, file: File): Int {
+    val conn = URL(url).openConnection() as HttpURLConnection
+    try {
+        conn.requestMethod = "PUT"
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 60_000
+        conn.doOutput = true
+        conn.setFixedLengthStreamingMode(file.length())
+        conn.setRequestProperty("Authorization", "Bearer $token")
+        conn.setRequestProperty("Content-Type", type)
+        conn.outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
+        return conn.responseCode
+    } finally {
+        conn.disconnect()
     }
 }
 
