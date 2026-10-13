@@ -35,8 +35,8 @@ internal object Session : JsonFileState<InboxSession?>(
     serializer = InboxSession.serializer().nullable,
     empty = null,
 ) {
-    /** Renewing at most this often while home keeps the session close to its full length. */
-    private const val RENEW_AFTER_MS = 60 * 60_000L
+    /** At home, a session is renewed once it's this old: within a few hours of its full length. */
+    private const val RENEW_AFTER_MS = 3 * 60 * 60_000L
 
     /** Away from home, the LAN door times out; don't try it on every 20-second refresh. */
     private const val RETRY_AFTER_MS = 5 * 60_000L
