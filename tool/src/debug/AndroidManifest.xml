@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug/side-load overlay; the plugin validates only src/main, so this never
+  reaches a submitted build.
+
+  TEMPORARY SPIKE — see sdk/client/.../display/LightDisplayColor.kt. Lets the app
+  switch LightOS's device-wide greyscale filter off while it is in front. Needs a
+  grant after each fresh install, which scripts/install.sh does:
+
+    adb shell pm grant com.thelightphone.relayinbox android.permission.WRITE_SECURE_SETTINGS
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+</manifest>

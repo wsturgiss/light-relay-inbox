@@ -65,8 +65,14 @@ both keep 90 days.
 ```bash
 export JAVA_HOME=/home/will/.jdks/jbr-21.0.11
 ./gradlew :tool:testDebugUnitTest :tool:assembleDebug
-/home/will/Projects/Android/platform-tools/adb install -r tool/build/outputs/apk/debug/tool-debug.apk
+scripts/install.sh
 ```
+
+`scripts/install.sh` installs the debug build, grants it `WRITE_SECURE_SETTINGS` so it
+shows in colour while it's in front (LightOS greys the whole phone otherwise; see
+`LightDisplayColor` in `sdk/client`), and re-locks the phone to portrait. Without the
+grant the app works the same, in grey. A plain `adb install -r` keeps an earlier grant;
+after an uninstall, run the script again.
 
 System Java 26 breaks Android jlink, so always use JBR 21. `sdk/keys/lightsdk-dev.jks` is
 untracked; copy it from a sibling project.
