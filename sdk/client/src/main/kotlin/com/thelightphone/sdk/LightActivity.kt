@@ -1,6 +1,7 @@
 package com.thelightphone.sdk
 
 import android.content.Context
+import com.thelightphone.sdk.display.LightDisplayColor
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -217,11 +218,16 @@ class LightActivity internal constructor() : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
+        // SDK PATCH (temporary spike, from light-amp): hand the display back to
+        // LightOS as we leave. See LightDisplayColor for why and how to remove it.
+        LightDisplayColor.restore(this)
         currentScreen.value?.screen?.notifyAppPause()
     }
 
     override fun onResume() {
         super.onResume()
+        // SDK PATCH (temporary spike): colour while we are in front.
+        LightDisplayColor.applyForeground(this)
         currentScreen.value?.screen?.notifyWillShow()
     }
 }

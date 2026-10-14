@@ -62,7 +62,7 @@ Build with JBR 21 (system Java 26 breaks jlink):
 
 ```bash
 ./gradlew :tool:testDebugUnitTest :tool:assembleDebug
-adb install -r tool/build/outputs/apk/debug/tool-debug.apk
+scripts/install.sh
 ```
 
 `tool/lighttool.toml` has `serverPackage = "com.lightos"` for the real LP3.
