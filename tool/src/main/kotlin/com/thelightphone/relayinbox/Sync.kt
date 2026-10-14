@@ -12,6 +12,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -93,8 +95,33 @@ val sync: LightJobHandler = { ctx, _ ->
 
 internal enum class SyncOutcome { Done, TryAgain, CantSync, NeedsHome }
 
-/** One fetch of messages and replies. The job runs it, and so does an open screen. */
-internal suspend fun syncOnce(filesDir: File): SyncOutcome {
+/** One sync at a time: the job, the inbox and an open conversation all ask, often at once. */
+private val syncing = Mutex()
+
+/** A sync this soon after the last one adds nothing, and each costs the inbox's per-minute allowance. */
+private const val MIN_GAP_MS = 10_000L
+
+/** The agents list rarely changes: fetched on the first sync and hourly after. */
+private const val AGENTS_EVERY_MS = 60 * 60_000L
+
+@Volatile
+private var lastSynced = 0L
+
+@Volatile
+private var agentsFetched = 0L
+
+/**
+ * One fetch of messages, replies and transcripts. The job runs it, and so does an open
+ * screen. Asked again while one is running, or within [MIN_GAP_MS] of the last, it does
+ * nothing: overlapping syncs used to spend the inbox's 20 requests a minute, and a reply
+ * sent then was refused and waited out a 30-second backoff.
+ */
+internal suspend fun syncOnce(filesDir: File): SyncOutcome = syncing.withLock {
+    if (System.currentTimeMillis() - lastSynced < MIN_GAP_MS) return@withLock SyncOutcome.Done
+    syncNow(filesDir).also { if (it == SyncOutcome.Done) lastSynced = System.currentTimeMillis() }
+}
+
+private suspend fun syncNow(filesDir: File): SyncOutcome {
     openStores(filesDir)
     val keys = Pairing.keys.value
     val url = inboxUrl()
@@ -109,7 +136,10 @@ internal suspend fun syncOnce(filesDir: File): SyncOutcome {
             fetchMessages(url, keys, bearer)
             fetchReplies(url, bearer)
             fetchTranscripts(url, bearer)
-            fetchAgents(url, bearer)
+            if (System.currentTimeMillis() - agentsFetched > AGENTS_EVERY_MS || Agents.state.value.isEmpty()) {
+                fetchAgents(url, bearer)
+                agentsFetched = System.currentTimeMillis()
+            }
         }
         SyncOutcome.Done
     } catch (e: IOException) {
@@ -125,7 +155,7 @@ internal suspend fun syncOnce(filesDir: File): SyncOutcome {
     }
 }
 
-/** How often an open screen checks in. Two small requests each time; the inbox allows 20 a minute. */
+/** How often an open screen checks in. Three small requests each time; the inbox allows 20 a minute. */
 private val LIVE_REFRESH = 20.seconds
 
 /**
