@@ -7,6 +7,7 @@ import com.thelightphone.sdk.LightJobResult
 import com.thelightphone.sdk.LightWork
 import com.thelightphone.sdk.SealedLightContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -68,7 +69,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                     continue@replies
                 }
                 val status = try {
-                    withContext(Dispatchers.IO) { upload(inboxRoute(url, "/attachments/${attachment.id}"), token, attachment.type, file) }
+                    soonAfter429 { withContext(Dispatchers.IO) { upload(inboxRoute(url, "/attachments/${attachment.id}"), token, attachment.type, file) } }
                 } catch (e: IOException) {
                     Log.w(TAG, "${attachment.id} not uploaded yet: $e")
                     retry = true
@@ -108,7 +109,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                 ),
             )
             val status = try {
-                withContext(Dispatchers.IO) { post(url, token, body) }
+                soonAfter429 { withContext(Dispatchers.IO) { post(url, token, body) } }
             } catch (e: IOException) {
                 Log.w(TAG, "Reply ${reply.id} not sent yet: $e")
                 retry = true
@@ -131,6 +132,20 @@ val sendReplies: LightJobHandler = { ctx, _ ->
         }
         if (retry) LightJobResult.Retry else LightJobResult.Success()
     }
+}
+
+/**
+ * Asks again a few seconds after a 429, a couple of times, before the job gives up for now.
+ * Left to WorkManager, a reply refused by the inbox's rate limit waited 30 seconds.
+ */
+private suspend fun soonAfter429(request: suspend () -> Int): Int {
+    var status = request()
+    repeat(2) { attempt ->
+        if (status != 429) return status
+        delay(3_000L * (attempt + 1))
+        status = request()
+    }
+    return status
 }
 
 private fun upload(url: String, token: String, type: String, file: File): Int {
