@@ -89,23 +89,28 @@ internal fun LightBarButtonView(
             }
         }
 
+        // The tap target is the bar's full height, as wide as the icon, so a compact bar
+        // still has one at least the bar tall.
         is LightBarButton.Icon -> {
             val size = button.sizeUnits.gridUnitsAsDp()
-            Image(
-                painter = button.painter,
-                contentDescription = button.contentDescription,
-                contentScale = ContentScale.Fit,
-                modifier = baseModifier.size(size),
-            )
+            Box(modifier = baseModifier.height(heightUnits.gridUnitsAsDp()), contentAlignment = Alignment.Center) {
+                Image(
+                    painter = button.painter,
+                    contentDescription = button.contentDescription,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(size),
+                )
+            }
         }
 
         is LightBarButton.LightIcon -> {
-            LightIcon(
-                icon = button.icon,
-                size = button.sizeUnits,
-                modifier = baseModifier,
-                contentDescription = button.contentDescription,
-            )
+            Box(modifier = baseModifier.height(heightUnits.gridUnitsAsDp()), contentAlignment = Alignment.Center) {
+                LightIcon(
+                    icon = button.icon,
+                    size = button.sizeUnits,
+                    contentDescription = button.contentDescription,
+                )
+            }
         }
     }
 }

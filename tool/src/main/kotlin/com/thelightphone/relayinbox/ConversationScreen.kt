@@ -40,6 +40,11 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
 import kotlinx.coroutines.launch
 import java.io.File
 
+/** The chat's bars, in grid units (1 unit = 1/27 of the screen width, 13.3 dp on the LP3). */
+internal const val CHAT_TOP_BAR_UNITS = 3f            // 40 dp, the tap target; no gap below (was 1 unit)
+internal const val CHAT_BOTTOM_BAR_GAP_UNITS = 0.25f  // was 1
+internal const val CHAT_BOTTOM_BAR_UNITS = 3f         // 40 dp, was 4
+
 class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
     private val refresh = LiveRefresh(viewModelScope, filesDir)
 
@@ -169,7 +174,8 @@ class ConversationScreen(
                             )
                         })
                     },
-                    modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
+                    // Compact, as Will asked: the LightOS bar is 3 units with a unit below it.
+                    heightUnits = CHAT_TOP_BAR_UNITS,
                 )
 
                 LightScrollView(
@@ -238,6 +244,9 @@ class ConversationScreen(
                 // between them when needed (an icon: a text button would cap the bar at 3).
                 val latest = conversation?.latest?.takeIf { canReply }
                 LightBottomBar(
+                    // Compact: the LightOS bar is 4 units with a unit above it.
+                    topPadding = CHAT_BOTTOM_BAR_GAP_UNITS.gridUnitsAsDp(),
+                    heightUnits = CHAT_BOTTOM_BAR_UNITS,
                     items = listOfNotNull(
                         latest?.let {
                             LightBarButton.LightIcon(icon = LightIcons.MICROPHONE, onClick = {
