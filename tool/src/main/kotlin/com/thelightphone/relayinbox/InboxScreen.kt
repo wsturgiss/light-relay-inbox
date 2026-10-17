@@ -75,7 +75,8 @@ class InboxScreen(
         val messages by RelayStore.state.collectAsState()
         val keys by Pairing.keys.collectAsState()
         val archive by Archive.state.collectAsState()
-        val all = remember(messages) { conversations(messages) }
+        val agents by Agents.state.collectAsState()
+        val all = remember(messages, agents) { channels(messages, agents) }
         val inbox = all.filterNot { it.isArchived(archive) }
         val archivedCount = all.size - inbox.size
 
@@ -192,16 +193,17 @@ private fun EmptyBody(paired: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
-/** Conversations as inbox rows, divided. Shared by the inbox and Archived. */
+/** Channels as inbox rows, divided. Shared by the inbox and Archived. */
 @Composable
 internal fun ConversationList(conversations: List<Conversation>, modifier: Modifier = Modifier, onOpen: (Conversation) -> Unit) {
+    val subjects by Subjects.state.collectAsState()
     LightScrollView(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = 1f.gridUnitsAsDp()),
     ) {
         conversations.forEachIndexed { index, conversation ->
-            ConversationRow(conversation) { onOpen(conversation) }
+            ConversationRow(conversation, subjects) { onOpen(conversation) }
             if (index != conversations.lastIndex) Divider()
         }
         Spacer(modifier = Modifier.height(2f.gridUnitsAsDp()))
@@ -221,13 +223,14 @@ private fun WaitingMark(waiting: Waiting) {
 }
 
 /**
- * A conversation: its first headline as the title, then where it has got to (the
- * latest message, or the detail while there's only one), then the last activity.
+ * A channel: who it's with as the title, its subject, then the latest word in it (theirs
+ * or yours), then the last activity.
  */
 @Composable
-private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
+private fun ConversationRow(conversation: Conversation, subjects: Map<String, String>, onClick: () -> Unit) {
     val first = conversation.messages.first()
     val latest = conversation.latest
+    val title = conversation.agent ?: first.headline
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -237,7 +240,7 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             LightText(
                 // Unread is an asterisk before the title, as in LightOS Messages.
-                text = if (conversation.unread) "*${first.headline}" else first.headline,
+                text = if (conversation.unread) "*$title" else title,
                 variant = LightTextVariant.Copy,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -245,12 +248,7 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
             )
             conversation.waiting?.let { WaitingMark(it) }
         }
-        val summary = when {
-            latest !== first -> latest.headline
-            // What you wrote, unless it's only the title again.
-            first.mine -> first.replies.lastOrNull()?.text.orEmpty().takeIf { it.trim() != first.headline }.orEmpty()
-            else -> first.detail
-        }
+        val summary = conversation.subject(subjects)
         if (summary.isNotBlank()) {
             LightText(
                 text = summary,
@@ -264,7 +262,6 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
         }
         val meta = listOfNotNull(
             formatTime(conversation.lastActivity),
-            first.to?.takeIf { first.mine }?.let { "to $it" },
             when {
                 conversation.needsAnswer -> "needs an answer"
                 // Yours and not answered yet: the summary already shows what you wrote.

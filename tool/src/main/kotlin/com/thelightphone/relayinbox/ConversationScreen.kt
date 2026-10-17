@@ -2,6 +2,7 @@ package com.thelightphone.relayinbox
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +26,7 @@ import com.thelightphone.sdk.SealedLightContext
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
@@ -64,6 +66,10 @@ class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
         }
     }
 
+    fun rename(id: String, subject: String) {
+        viewModelScope.launch { Subjects.rename(id, subject) }
+    }
+
     fun archive(threadId: String, then: () -> Unit) {
         viewModelScope.launch {
             Archive.archive(threadId)
@@ -87,9 +93,9 @@ class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
 }
 
 /**
- * One conversation, oldest first and opening on the latest: each message from the agent
- * with your replies under it. A message still waiting on a choice keeps its choices;
- * **Reply** answers the latest message.
+ * One channel, oldest first and opening on the latest: everything from one agent, with your
+ * replies in between. A message still waiting on a choice keeps its choices; **Reply**
+ * answers the latest message, which the relay hands to that agent.
  */
 class ConversationScreen(
     sealedActivity: SealedLightActivity,
@@ -107,13 +113,15 @@ class ConversationScreen(
         val messages by RelayStore.state.collectAsState()
         val keys by Pairing.keys.collectAsState()
         val archive by Archive.state.collectAsState()
-        val conversation = remember(messages) { conversations(messages).firstOrNull { it.id == threadId } }
+        val agents by Agents.state.collectAsState()
+        val subjects by Subjects.state.collectAsState()
+        val conversation = remember(messages, agents) { channels(messages, agents).firstOrNull { it.id == threadId } }
         val scrollState = rememberScrollState()
         // Follow the bottom while the layout settles and as messages arrive, until you scroll up.
         var pinnedToEnd by remember { mutableStateOf(true) }
 
         // Read covers anything that arrives while it's open, too.
-        LaunchedEffect(messages) { RelayStore.markThreadRead(threadId) }
+        LaunchedEffect(messages) { conversation?.let { c -> RelayStore.markRead(c.messages.map { it.id }.toSet()) } }
         LaunchedEffect(scrollState.maxValue) {
             if (pinnedToEnd) scrollState.scrollTo(scrollState.maxValue)
         }
@@ -130,16 +138,26 @@ class ConversationScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text(conversation?.messages?.first()?.headline.orEmpty()),
+                    center = LightTopBarCenter.Text(conversation?.agent ?: conversation?.messages?.first()?.headline.orEmpty()),
                     rightButton = conversation?.let { c ->
                         LightBarButton.LightIcon(icon = LightIcons.SETTINGS, onClick = {
                             val archived = c.isArchived(archive)
                             navigateTo(
                                 screenFactory = {
-                                    MenuScreen(it, "Conversation", listOf(if (archived) MenuItem("restore", "Move to inbox") else MenuItem("archive", "Archive")))
+                                    MenuScreen(it, c.agent ?: "Conversation", listOf(
+                                        MenuItem("rename", "Rename subject"),
+                                        if (archived) MenuItem("restore", "Move to inbox") else MenuItem("archive", "Archive"),
+                                    ))
                                 },
                                 resultCallback = { key ->
                                     when (key) {
+                                        "rename" -> navigateTo(
+                                            screenFactory = {
+                                                TextEditorScreen(it, EditorRequest(title = "Subject", initialValue = c.subject(subjects), initialCaps = true))
+                                            },
+                                            // Blank goes back to the automatic subject.
+                                            resultCallback = { text -> if (text != null) viewModel.rename(c.id, text) },
+                                        )
                                         // Archived: back to where you came from, which no longer lists it.
                                         "archive" -> viewModel.archive(threadId) { goBack() }
                                         "restore" -> viewModel.restore(threadId) { goBack() }
@@ -162,6 +180,7 @@ class ConversationScreen(
                         LightText(text = "This conversation is gone.", variant = LightTextVariant.Copy, lighten = true)
                         return@LightScrollView
                     }
+                    ToLine(conversation.agent, conversation.subject(subjects))
                     timeline(conversation).forEach { entry ->
                         when (entry) {
                             is Entry.FromAgent -> AgentEntry(entry.message, canReply) { choice ->
@@ -273,6 +292,32 @@ private fun AgentEntry(message: RelayMessage, canReply: Boolean, onChoice: (Stri
     }
 }
 
+/** Who you're writing to, and about what, above the messages, as a mail header would. */
+@Composable
+private fun ToLine(agent: String?, subject: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        agent?.let { LightText(text = "To: $it", variant = LightTextVariant.Copy, modifier = Modifier.fillMaxWidth()) }
+        if (subject.isNotBlank()) {
+            LightText(text = subject, variant = LightTextVariant.Detail, lighten = true, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** A voice note as a waveform and its length, not words. */
+@Composable
+private fun VoiceLabel(attachment: Attachment) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        LightIcon(LightIcons.AUDIO_MESSAGE, size = 1.2f, contentDescription = "voice note")
+        attachment.durationMs?.let {
+            LightText(
+                text = formatDuration(it),
+                variant = LightTextVariant.Paragraph,
+                modifier = Modifier.padding(start = 0.4f.gridUnitsAsDp()),
+            )
+        }
+    }
+}
+
 /** Right, like your side in Messages: the date flush right, the text indented under it. */
 @Composable
 private fun YourEntry(reply: Reply) {
@@ -292,9 +337,12 @@ private fun YourEntry(reply: Reply) {
         LightText(text = formatDateTime(reply.at) + state, variant = LightTextVariant.Detail)
         (reply.choice ?: reply.text)?.let { LightText(text = it, variant = LightTextVariant.Paragraph) }
         reply.attachments.forEach { attachment ->
-            LightText(text = "[${attachment.label()}]", variant = LightTextVariant.Paragraph)
+            if (attachment.isVoice) VoiceLabel(attachment) else LightText(text = "[${attachment.label()}]", variant = LightTextVariant.Paragraph)
             attachment.transcript?.takeIf { it.isNotBlank() }?.let { LightText(text = it, variant = LightTextVariant.Paragraph) }
             attachment.transcriptError?.let { LightText(text = it, variant = LightTextVariant.Detail, lighten = true) }
+            if (attachment.awaitingTranscript(reply)) {
+                LightText(text = "Transcribing…", variant = LightTextVariant.Detail, lighten = true)
+            }
         }
     }
 }
