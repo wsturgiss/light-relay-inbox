@@ -31,7 +31,9 @@ private val BOTTOMBAR_TEXT_VARIANT = LightTextVariant.Button
 fun LightBottomBar(
     items: List<LightBottomBarItem?>,
     modifier: Modifier = Modifier,
-    topPadding: Dp = TOP_MARGIN_UNITS.gridUnitsAsDp()
+    topPadding: Dp = TOP_MARGIN_UNITS.gridUnitsAsDp(),
+    /** The bar's height in grid units; a compact screen can pass less than the LightOS default. */
+    heightUnits: Float = BOTTOMBAR_HEIGHT_UNITS,
 ) {
     require(items.size <= 5) { "LightBottomBar supports at most 5 items" }
 
@@ -40,7 +42,7 @@ fun LightBottomBar(
         "LightBottomBar with text supports at most 3 items"
     }
 
-    val barHeight = BOTTOMBAR_HEIGHT_UNITS.gridUnitsAsDp()
+    val barHeight = heightUnits.gridUnitsAsDp()
     val horizontalPadding = when (items.size) {
         0, 1 -> 0f.gridUnitsAsDp()
         else -> HORIZONTAL_PADDING_MULTI_UNITS.gridUnitsAsDp()
@@ -62,16 +64,16 @@ fun LightBottomBar(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    LightBottomBarItemView(items[0])
+                    LightBottomBarItemView(items[0], heightUnits)
                 }
             }
 
             2 -> {
                 LightBottomBarSlot(align = Alignment.CenterStart) {
-                    LightBottomBarItemView(items[0])
+                    LightBottomBarItemView(items[0], heightUnits)
                 }
                 LightBottomBarSlot(align = Alignment.CenterEnd) {
-                    LightBottomBarItemView(items[1])
+                    LightBottomBarItemView(items[1], heightUnits)
                 }
             }
 
@@ -83,18 +85,18 @@ fun LightBottomBar(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         items.forEach { item ->
-                            LightBottomBarItemView(item)
+                            LightBottomBarItemView(item, heightUnits)
                         }
                     }
                 } else {
                     LightBottomBarSlot(align = Alignment.CenterStart) {
-                        LightBottomBarItemView(items[0])
+                        LightBottomBarItemView(items[0], heightUnits)
                     }
                     LightBottomBarSlot(align = Alignment.Center) {
-                        LightBottomBarItemView(items[1])
+                        LightBottomBarItemView(items[1], heightUnits)
                     }
                     LightBottomBarSlot(align = Alignment.CenterEnd) {
-                        LightBottomBarItemView(items[2])
+                        LightBottomBarItemView(items[2], heightUnits)
                     }
                 }
             }
@@ -106,7 +108,7 @@ fun LightBottomBar(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     items.forEach { item ->
-                        LightBottomBarItemView(item)
+                        LightBottomBarItemView(item, heightUnits)
                     }
                 }
             }
@@ -128,10 +130,10 @@ private fun RowScope.LightBottomBarSlot(
 }
 
 @Composable
-private fun LightBottomBarItemView(item: LightBottomBarItem?) {
+private fun LightBottomBarItemView(item: LightBottomBarItem?, heightUnits: Float) {
     LightBarButtonView(
         button = item,
-        heightUnits = BOTTOMBAR_HEIGHT_UNITS,
+        heightUnits = heightUnits,
         iconSizeUnits = LightBarButtonDefaults.ICON_SIZE_UNITS,
         textVariant = BOTTOMBAR_TEXT_VARIANT,
         useSpacerWhenNull = true,

@@ -42,8 +42,10 @@ fun LightTopBar(
     center: LightTopBarCenter? = null,
     rightButton: LightTopBarButton? = null,
     modifier: Modifier = Modifier,
+    /** The bar's height in grid units; a compact screen can pass less than the LightOS default. */
+    heightUnits: Float = TOPBAR_HEIGHT_UNITS,
 ) {
-    val barHeight = TOPBAR_HEIGHT_UNITS.gridUnitsAsDp()
+    val barHeight = heightUnits.gridUnitsAsDp()
     val horizontalPadding = HORIZONTAL_PADDING_UNITS.gridUnitsAsDp()
 
     Box(
@@ -65,7 +67,7 @@ fun LightTopBar(
             ) {
                 LightBarButtonView(
                     button = leftButton,
-                    heightUnits = TOPBAR_HEIGHT_UNITS,
+                    heightUnits = heightUnits,
                     textVariant = TOPBAR_BUTTON_TEXT_VARIANT,
                     useSpacerWhenNull = true,
                 )
@@ -79,7 +81,7 @@ fun LightTopBar(
             ) {
                 LightBarButtonView(
                     button = rightButton,
-                    heightUnits = TOPBAR_HEIGHT_UNITS,
+                    heightUnits = heightUnits,
                     textVariant = TOPBAR_BUTTON_TEXT_VARIANT,
                     useSpacerWhenNull = true,
                 )
