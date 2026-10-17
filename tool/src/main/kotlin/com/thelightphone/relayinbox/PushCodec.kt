@@ -21,6 +21,9 @@ internal object PushCodec {
         val thread: String? = null,
         val from: String? = null,
         val image: MessageImage? = null,
+        val options: List<ChoiceOption>? = null,
+        val select: String? = null,
+        val other: Boolean = false,
     )
 
     fun decode(data: ByteArray, pushKey: String, receivedAt: Long = System.currentTimeMillis()): RelayMessage? {
@@ -47,6 +50,9 @@ internal object PushCodec {
             // A picture described oddly is left off; the text still shows.
             image = wire.image?.takeIf { it.isValid() },
             sentAt = wire.at,
+            options = wire.options?.takeIf { it.isNotEmpty() },
+            select = wire.select,
+            other = wire.other && wire.choices.isNotEmpty(),
             receivedAt = receivedAt,
         )
     }

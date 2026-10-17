@@ -55,12 +55,15 @@ class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
         choice: String? = null,
         text: String? = null,
         attachments: List<Attachment> = emptyList(),
+        choiceIds: List<String>? = null,
+        other: Boolean = false,
     ) {
         viewModelScope.launch {
             val id = "r_" + randomHex(8)
             RelayStore.addReply(
                 messageId,
-                Reply(id = id, choice = choice, text = text, at = System.currentTimeMillis(), attachments = attachments),
+                Reply(id = id, choice = choice, text = text, at = System.currentTimeMillis(), attachments = attachments,
+                    choiceIds = choiceIds, other = other),
             )
             scheduleReplySend(context)
         }
@@ -190,8 +193,30 @@ class ConversationScreen(
                                 onImage = { image ->
                                     navigateTo(screenFactory = { ImageScreen(it, image, entry.message.headline) })
                                 },
-                            ) { choice ->
-                                viewModel.reply(lightContext, entry.message.id, choice = choice)
+                                onOther = {
+                                    navigateTo(
+                                        screenFactory = { TextEditorScreen(it, EditorRequest(title = "Other", initialValue = "", initialCaps = true)) },
+                                        resultCallback = { text ->
+                                            if (!text.isNullOrBlank()) viewModel.reply(lightContext, entry.message.id, text = text.trim(), other = true)
+                                        },
+                                    )
+                                },
+                            ) { picked ->
+                                val send = {
+                                    viewModel.reply(lightContext, entry.message.id, choice = picked.joinToString(", ") { it.label },
+                                        choiceIds = picked.map { it.id })
+                                }
+                                val risky = picked.filter { it.danger }
+                                if (risky.isEmpty()) send()
+                                else navigateTo(
+                                    screenFactory = {
+                                        MenuScreen(it, "Are you sure?", listOf(
+                                            MenuItem("yes", "Yes, ${risky.joinToString(", ") { o -> o.label }}"),
+                                            MenuItem("no", "Cancel"),
+                                        ))
+                                    },
+                                    resultCallback = { key -> if (key == "yes") send() },
+                                )
                             }
                             is Entry.FromYou -> YourEntry(entry.reply)
                         }
@@ -281,7 +306,8 @@ private fun AgentEntry(
     canReply: Boolean,
     filesDir: File,
     onImage: (MessageImage) -> Unit,
-    onChoice: (String) -> Unit,
+    onOther: () -> Unit,
+    onChoice: (List<ChoiceOption>) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 1.7f.gridUnitsAsDp())) {
         LightText(text = formatDateTime(message.receivedAt), variant = LightTextVariant.Detail, modifier = Modifier.fillMaxWidth())
@@ -304,10 +330,34 @@ private fun AgentEntry(
                 onClick = { onImage(image) },
             )
         }
-        if (message.needsAnswer) {
+        val options = message.choiceOptions
+        if (options.isNotEmpty()) {
             Spacer(modifier = Modifier.height(0.5f.gridUnitsAsDp()))
-            message.choices.forEach { choice ->
-                ActionRow(label = choice, enabled = canReply) { onChoice(choice) }
+            val answer = message.answer
+            if (answer != null) {
+                // Answered: the choices stay, locked, with a check on what you picked.
+                val picked = message.pickedIds
+                options.forEach { option ->
+                    ActionRow(label = option.label, enabled = false, checked = option.id in picked, danger = option.danger) {}
+                }
+                if (message.other) ActionRow(label = "Other…", enabled = false, checked = answer.other) {}
+            } else if (message.multiSelect) {
+                var selected by remember(message.id) { mutableStateOf(emptySet<String>()) }
+                options.forEach { option ->
+                    ActionRow(label = option.label, enabled = canReply, checked = option.id in selected, danger = option.danger,
+                        showBox = true) {
+                        selected = if (option.id in selected) selected - option.id else selected + option.id
+                    }
+                }
+                if (message.other) ActionRow(label = "Other…", enabled = canReply, onClick = onOther)
+                ActionRow(label = "Done", enabled = canReply && selected.isNotEmpty(), underline = true) {
+                    onChoice(options.filter { it.id in selected })
+                }
+            } else {
+                options.forEach { option ->
+                    ActionRow(label = option.label, enabled = canReply, danger = option.danger) { onChoice(listOf(option)) }
+                }
+                if (message.other) ActionRow(label = "Other…", enabled = canReply, onClick = onOther)
             }
         }
     }
@@ -356,7 +406,7 @@ private fun YourEntry(reply: Reply) {
         horizontalAlignment = Alignment.End,
     ) {
         LightText(text = formatDateTime(reply.at) + state, variant = LightTextVariant.Detail)
-        (reply.choice ?: reply.text)?.let { LightText(text = it, variant = LightTextVariant.Paragraph) }
+        (reply.choice ?: reply.text)?.let { if (reply.other) "Other: $it" else it }?.let { LightText(text = it, variant = LightTextVariant.Paragraph) }
         reply.attachments.forEach { attachment ->
             if (attachment.isVoice) VoiceLabel(attachment) else LightText(text = "[${attachment.label()}]", variant = LightTextVariant.Paragraph)
             attachment.transcript?.takeIf { it.isNotBlank() }?.let { LightText(text = it, variant = LightTextVariant.Paragraph) }

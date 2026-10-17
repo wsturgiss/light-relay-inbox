@@ -21,8 +21,11 @@ agent. Light's push server accepts pushes, but they don't reach the tool yet; se
   conversation: type it, and the first line becomes the title.
 - **Conversation:** laid out like LightOS Messages, titled with the conversation and
   opening on the latest: the agent's messages on the left and yours on the right, each
-  under its date, in the order they happened. A message still waiting on a choice shows
-  its choices. The compose button replies to the latest message. A reply says *sending* or *not sent* until it reaches the relay,
+  under its date, in the order they happened. A message with choices shows them; once
+  you answer, they stay, locked, with a check on your pick. A choice the agent marked
+  dangerous is inverted and asks "Are you sure?" first. With `select: "many"` you tick
+  several, then **Done**; with `other`, **Other…** opens the editor and sends your text as
+  the answer. The compose button replies to the latest message. A reply says *sending* or *not sent* until it reaches the relay,
   and **Retry** re-queues failures.
 - **Archive:** the gear on a conversation archives it (or, once archived, moves it back).
   Archived conversations are under the inbox's gear, in **Archived**. One comes back to the

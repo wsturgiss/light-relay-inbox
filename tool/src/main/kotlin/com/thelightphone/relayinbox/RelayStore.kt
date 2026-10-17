@@ -32,7 +32,42 @@ data class RelayMessage(
     val replies: List<Reply> = emptyList(),
     /** A picture the agent sent with it, shown under the text once downloaded (see Images.kt). */
     val image: MessageImage? = null,
+    /** [choices] with ids and styles, when the agent gave them; else see [choiceOptions]. */
+    val options: List<ChoiceOption>? = null,
+    /** "many": pick any of the choices, then Done. Otherwise one tap answers. */
+    val select: String? = null,
+    /** Offers "Other…": a typed answer instead of a choice. */
+    val other: Boolean = false,
 )
+
+/** One of the answers an agent offers. A "danger" one asks you to confirm. */
+@Serializable
+data class ChoiceOption(val id: String, val label: String, val style: String = "default") {
+    val danger: Boolean get() = style == "danger"
+}
+
+/** The choices as options: the agent's, or its labels as c1, c2, … (as the relay numbers them). */
+val RelayMessage.choiceOptions: List<ChoiceOption>
+    get() = options?.takeIf { it.isNotEmpty() } ?: choices.mapIndexed { i, label -> ChoiceOption("c${i + 1}", label) }
+
+val RelayMessage.multiSelect: Boolean get() = select == "many"
+
+/** Your answer to its question: the first choice or "Other" you sent (or are sending). */
+val RelayMessage.answer: Reply?
+    get() = if (choices.isEmpty()) null
+    else replies.firstOrNull { (it.choice != null || it.other) && it.state != ReplyState.Failed }
+
+/** The ids of what you picked; for an answer from before ids, matched by label. */
+val RelayMessage.pickedIds: Set<String>
+    get() {
+        val a = answer ?: return emptySet()
+        a.choiceIds?.let { return it.toSet() }
+        val choice = a.choice ?: return emptySet()
+        val opts = choiceOptions
+        opts.firstOrNull { it.label == choice }?.let { return setOf(it.id) }
+        val parts = choice.split(", ").toSet()
+        return opts.filter { it.label in parts }.map { it.id }.toSet()
+    }
 
 /**
  * A picture on an agent's message, as the signed message describes it. The file comes from
@@ -57,7 +92,7 @@ val RelayMessage.threadId: String get() = thread ?: id
 
 /** Waiting on you: it offers choices and you haven't answered. */
 val RelayMessage.needsAnswer: Boolean
-    get() = choices.isNotEmpty() && replies.none { it.choice != null && it.state != ReplyState.Failed }
+    get() = choices.isNotEmpty() && answer == null
 
 /**
  * One conversation, oldest message first. A channel holds everything to and from one agent
@@ -144,6 +179,10 @@ data class Reply(
     val text: String? = null,
     val at: Long,
     val state: ReplyState = ReplyState.Pending,
+    /** The choices picked, by id; [choice] holds their labels. */
+    val choiceIds: List<String>? = null,
+    /** A typed answer to the question ("Other…"), in [text]. */
+    val other: Boolean = false,
     val attachments: List<Attachment> = emptyList(),
 )
 
@@ -329,6 +368,7 @@ internal fun withInboxReplies(list: List<RelayMessage>, fromInbox: List<InboxRep
         val updated = m.replies.map { if (it.id in stored && it.state != ReplyState.Sent) it.copy(state = ReplyState.Sent) else it }
         val restored = incoming.filter { it.id !in known }.map {
             Reply(id = it.id, choice = it.choice, text = it.text, at = it.sentAtMillis(), state = ReplyState.Sent,
+                choiceIds = it.choiceIds, other = it.other,
                 attachments = it.attachments.map { a ->
                     Attachment(id = a.id, type = a.type, bytes = a.bytes, uploaded = true,
                         transcript = a.transcript, transcriptError = a.transcriptError)
@@ -370,6 +410,8 @@ data class InboxReply(
     /** On a conversation you started: who it was for. */
     val to: String? = null,
     val attachments: List<InboxAttachment> = emptyList(),
+    val choiceIds: List<String>? = null,
+    val other: Boolean = false,
 ) {
     fun sentAtMillis(): Long = parseInstant(sentAt) ?: parseInstant(receivedAt) ?: 0
 }
