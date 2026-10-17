@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -108,7 +110,8 @@ class ImageViewModel : LightViewModel<Unit>()
 /**
  * One picture, full screen: it opens fitted to the screen. Pinch to zoom (up to 6x, or more
  * for a wide one, so a table's rows can fill the height), drag to pan, double-tap to zoom in
- * where you tap or back out.
+ * where you tap or back out. Press and hold to hide the top bar and the hint for the whole
+ * screen; hold again, or tap once, to bring them back. Back still leaves.
  */
 class ImageScreen(
     sealedActivity: SealedLightActivity,
@@ -125,36 +128,50 @@ class ImageScreen(
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
         val bitmap = rememberImageBitmap(lightContext.filesDir, image)
+        var barsHidden by remember { mutableStateOf(false) }
         LightTheme(colors = themeColors) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background),
             ) {
-                LightTopBar(
-                    leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text(title.ifBlank { "Picture" }),
-                )
+                if (!barsHidden) {
+                    LightTopBar(
+                        leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                        center = LightTopBarCenter.Text(title.ifBlank { "Picture" }),
+                    )
+                }
                 Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     if (bitmap == null) {
                         LightText(text = "Picture not available", variant = LightTextVariant.Detail, lighten = true)
                     } else {
-                        ZoomableImage(bitmap)
+                        ZoomableImage(
+                            bitmap,
+                            onHold = { barsHidden = !barsHidden },
+                            onTap = { if (barsHidden) barsHidden = false },
+                        )
                     }
                 }
-                LightText(
-                    text = "Pinch to zoom · drag to move · double-tap",
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
-                    modifier = Modifier.padding(horizontal = 2f.gridUnitsAsDp(), vertical = 0.6f.gridUnitsAsDp()),
-                )
+                if (!barsHidden) {
+                    LightText(
+                        text = "Pinch to zoom · double-tap · hold for full screen",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(horizontal = 2f.gridUnitsAsDp(), vertical = 0.6f.gridUnitsAsDp()),
+                    )
+                }
             }
         }
     }
 }
 
+/**
+ * [onHold] is a press and hold with one finger that didn't move: a pinch or a pan never
+ * counts, even if the fingers rest a while. [onTap] is a single tap (after the double-tap
+ * window passes, so a double-tap stays a zoom).
+ */
 @Composable
-private fun ZoomableImage(bitmap: Bitmap) {
+private fun ZoomableImage(bitmap: Bitmap, onHold: () -> Unit = {}, onTap: () -> Unit = {}) {
     val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
     BoxWithConstraints(modifier = Modifier.fillMaxSize().clipToBounds()) {
         val box = Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
@@ -165,6 +182,8 @@ private fun ZoomableImage(bitmap: Bitmap) {
         val maxScale = max(6f, box.height / base.height)
         var scale by remember(bitmap) { mutableFloatStateOf(1f) }
         var offset by remember(bitmap) { mutableStateOf(Offset.Zero) }
+        // Set once a gesture has had a second finger or has zoomed or panned; cleared on the next first touch.
+        var gestureMoved by remember { mutableStateOf(false) }
 
         fun clamp(o: Offset, s: Float): Offset {
             val maxX = max(0f, (base.width * s - box.width) / 2)
@@ -172,14 +191,33 @@ private fun ZoomableImage(bitmap: Bitmap) {
             return Offset(o.x.coerceIn(-maxX, maxX), o.y.coerceIn(-maxY, maxY))
         }
 
+        // The screen grows when the bars hide: keep the picture inside the new edges.
+        LaunchedEffect(box) { offset = clamp(offset, scale) }
+
         Image(
             bitmap = imageBitmap,
             contentDescription = "Picture from the agent",
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxSize()
+                // Watches every gesture before the detectors do, without consuming anything.
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val down = event.changes.count { it.pressed }
+                            if (down == 1 && event.changes.size == 1 && event.changes[0].pressed && !event.changes[0].previousPressed) {
+                                gestureMoved = false
+                            }
+                            if (down > 1) gestureMoved = true
+                        }
+                    }
+                }
                 .pointerInput(box, bitmap) {
-                    detectTapGestures(onDoubleTap = { tap ->
+                    detectTapGestures(
+                        onLongPress = { if (!gestureMoved) onHold() },
+                        onTap = { onTap() },
+                        onDoubleTap = { tap ->
                         if (scale > 1.05f) {
                             scale = 1f
                             offset = Offset.Zero
@@ -190,10 +228,12 @@ private fun ZoomableImage(bitmap: Bitmap) {
                             offset = clamp(c * (1 - target), target)
                             scale = target
                         }
-                    })
+                    },
+                    )
                 }
                 .pointerInput(box, bitmap) {
                     detectTransformGestures { centroid, pan, zoom, _ ->
+                        gestureMoved = true
                         val newScale = (scale * zoom).coerceIn(1f, maxScale)
                         // Keep the point under the fingers where it is while zooming.
                         val c = centroid - Offset(box.width / 2, box.height / 2)
