@@ -77,21 +77,44 @@ internal fun Divider() {
     )
 }
 
-/** A full-width tappable line of centred text — one per choice. */
+/**
+ * A full-width tappable line of centred text — one per choice. [checked] marks a pick
+ * (✓); [showBox] keeps room for one while picking several. A [danger] choice is
+ * inverted, white on black, so it can't be mistaken for the others.
+ */
 @Composable
-internal fun ActionRow(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun ActionRow(
+    label: String,
+    enabled: Boolean = true,
+    checked: Boolean = false,
+    danger: Boolean = false,
+    showBox: Boolean = false,
+    underline: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val colors = LightThemeTokens.colors
+    val text = when {
+        checked -> "✓ $label"
+        showBox -> "○ $label"
+        else -> label
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 0.6f.gridUnitsAsDp())
+            .padding(vertical = 0.3f.gridUnitsAsDp())
+            .then(if (danger) Modifier.background(colors.content) else Modifier)
+            .padding(vertical = 0.3f.gridUnitsAsDp())
             .then(if (enabled) Modifier.lightClickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         LightText(
-            text = label,
+            text = text,
             variant = LightTextVariant.Copy,
-            lighten = !enabled,
+            // A locked row you didn't pick fades; your pick stays dark.
+            lighten = !enabled && !checked,
+            underline = underline,
             align = TextAlign.Center,
+            color = if (danger) colors.background else null,
             modifier = Modifier.fillMaxWidth(),
         )
     }
