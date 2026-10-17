@@ -25,6 +25,9 @@ import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightCapturedPhoto
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightText
+import com.thelightphone.sdk.ui.LightTextVariant
+import com.thelightphone.sdk.ui.lightClickable
 import com.thelightphone.sdk.ui.LightTheme
 import com.thelightphone.sdk.ui.LightThemeController
 import com.thelightphone.sdk.ui.LightThemeTokens
@@ -90,12 +93,25 @@ class PhotoScreen(
         LightTheme(colors = themeColors) {
             val photo = taken
             if (photo == null) {
-                LightPhotoCapture(
-                    onCaptured = viewModel::keep,
-                    onBack = { goBack(null) },
-                    title = "Photo",
-                    maxLongEdgePx = PHOTO_LONG_EDGE_PX,
-                )
+                // The camera's own bar has only the shutter; Cancel sits over its left end,
+                // so leaving doesn't depend on finding the small back arrow.
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LightPhotoCapture(
+                        onCaptured = viewModel::keep,
+                        onBack = { goBack(null) },
+                        title = "Photo",
+                        maxLongEdgePx = PHOTO_LONG_EDGE_PX,
+                    )
+                    LightText(
+                        text = "Cancel",
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 1f.gridUnitsAsDp(), bottom = 1.2f.gridUnitsAsDp())
+                            .lightClickable(onClick = { goBack(null) })
+                            .padding(0.5f.gridUnitsAsDp()),
+                    )
+                }
             } else {
                 Review(photo)
             }

@@ -47,8 +47,8 @@ import kotlinx.coroutines.launch
 
 enum class VoiceNoteState { NeedsPermission, Ready, Recording, Review }
 
-/** A note stops itself here; the relay takes 10 MB, which AAC at this rate never nears. */
-private const val MAX_RECORDING_MS = 5 * 60_000L
+/** A note stops itself here (issue #12: about two minutes); the relay takes 10 MB, which AAC never nears. */
+internal const val MAX_RECORDING_MS = 2 * 60_000L
 
 class VoiceNoteViewModel(private val filesDir: File, audio: LightAudio) : LightViewModel<Attachment>() {
     val state = MutableStateFlow(VoiceNoteState.NeedsPermission)
@@ -62,6 +62,8 @@ class VoiceNoteViewModel(private val filesDir: File, audio: LightAudio) : LightV
     private var file: File? = null
     private var startedAt = 0L
     private var ticker: Job? = null
+    /** Opening the screen starts recording, once (issue #12); after Delete, the microphone records again. */
+    private var autoStarted = false
 
     init {
         viewModelScope.launch { player.isPlaying.collect { playing.value = it } }
@@ -75,6 +77,10 @@ class VoiceNoteViewModel(private val filesDir: File, audio: LightAudio) : LightV
                 .getOrDefault(false)
             if (state.value == VoiceNoteState.NeedsPermission && granted) state.value = VoiceNoteState.Ready
             if (!granted) state.value = VoiceNoteState.NeedsPermission
+            if (state.value == VoiceNoteState.Ready && !autoStarted) {
+                autoStarted = true
+                record()
+            }
         }
     }
 
@@ -164,7 +170,7 @@ class VoiceNoteViewModel(private val filesDir: File, audio: LightAudio) : LightV
     }
 }
 
-/** Record a voice note: record, stop, listen back, then send or delete. Returns the note. */
+/** Record a voice note: it starts recording at once; stop, listen back, then send or delete. Returns the note. */
 class VoiceNoteScreen(
     private val sealedActivity: SealedLightActivity,
 ) : LightScreen<Attachment, VoiceNoteViewModel>(sealedActivity) {
@@ -204,7 +210,7 @@ class VoiceNoteScreen(
                         text = when (state) {
                             VoiceNoteState.NeedsPermission -> "Relay Inbox needs the microphone to record."
                             VoiceNoteState.Ready -> error ?: "Tap the microphone to record."
-                            VoiceNoteState.Recording -> "Recording\n${formatDuration(elapsed)}"
+                            VoiceNoteState.Recording -> "Recording\n${formatDuration(elapsed)} of ${formatDuration(MAX_RECORDING_MS)}"
                             VoiceNoteState.Review -> formatDuration(elapsed)
                         },
                         variant = if (state == VoiceNoteState.Recording || state == VoiceNoteState.Review) {

@@ -86,4 +86,5 @@ internal suspend fun openStores(dir: File) {
     Archive.open(dir)
     Session.open(dir)
     Agents.open(dir)
+    Subjects.open(dir)
 }

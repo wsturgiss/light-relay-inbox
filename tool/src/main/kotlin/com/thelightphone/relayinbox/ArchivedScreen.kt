@@ -40,7 +40,7 @@ class ArchivedScreen(
         val themeColors by LightThemeController.colors.collectAsState()
         val messages by RelayStore.state.collectAsState()
         val archive by Archive.state.collectAsState()
-        val archived = remember(messages, archive) { conversations(messages).filter { it.isArchived(archive) } }
+        val archived = remember(messages, archive) { channels(messages, Agents.state.value).filter { it.isArchived(archive) } }
 
         LightTheme(colors = themeColors) {
             Column(

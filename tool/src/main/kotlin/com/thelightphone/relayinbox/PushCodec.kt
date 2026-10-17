@@ -19,6 +19,7 @@ internal object PushCodec {
         val detail: String = "",
         val choices: List<String> = emptyList(),
         val thread: String? = null,
+        val from: String? = null,
     )
 
     fun decode(data: ByteArray, pushKey: String, receivedAt: Long = System.currentTimeMillis()): RelayMessage? {
@@ -41,6 +42,7 @@ internal object PushCodec {
             detail = wire.detail,
             choices = wire.choices,
             thread = wire.thread,
+            from = wire.from,
             sentAt = wire.at,
             receivedAt = receivedAt,
         )

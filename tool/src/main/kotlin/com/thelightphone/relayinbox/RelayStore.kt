@@ -22,6 +22,8 @@ data class RelayMessage(
     val mine: Boolean = false,
     /** For a conversation you started: the agent you picked under To, if the inbox offered any. */
     val to: String? = null,
+    /** Which agent sent it, when the relay knows (the agent named itself with its token). */
+    val from: String? = null,
     /** When the relay sent it, ISO-8601 UTC, as the relay stamped it. */
     val sentAt: String = "",
     /** When the phone received it, epoch millis. Fetched history uses [sentAt] instead. */
@@ -37,8 +39,11 @@ val RelayMessage.threadId: String get() = thread ?: id
 val RelayMessage.needsAnswer: Boolean
     get() = choices.isNotEmpty() && replies.none { it.choice != null && it.state != ReplyState.Failed }
 
-/** One conversation, oldest message first. */
-data class Conversation(val id: String, val messages: List<RelayMessage>) {
+/**
+ * One conversation, oldest message first. A channel holds everything to and from one agent
+ * ([agent]); a thread (from [conversations]) holds one exchange.
+ */
+data class Conversation(val id: String, val messages: List<RelayMessage>, val agent: String? = null) {
     val latest: RelayMessage get() = messages.last()
     val lastActivity: Long get() = messages.maxOf { m -> maxOf(m.receivedAt, m.replies.maxOfOrNull { it.at } ?: 0) }
     val unread: Boolean get() = messages.any { !it.read }
@@ -83,6 +88,29 @@ internal object Archive : JsonFileState<Map<String, Long>>(
 internal fun Conversation.isArchived(archive: Map<String, Long>): Boolean =
     archive[id]?.let { it >= lastActivity } == true
 
+/** The agent a message is with: who sent it, else who the phone conversation it belongs to is for. */
+internal fun agentOf(message: RelayMessage, byId: Map<String, RelayMessage>): String? =
+    message.from
+        ?: message.to?.takeIf { message.mine }
+        ?: message.thread?.let { byId[it] }?.let { root -> root.to?.takeIf { root.mine } ?: root.from }
+
+/** A channel's id: `@` and the agent's name. */
+internal fun channelId(agent: String): String = "@$agent"
+
+/**
+ * One channel per agent, most recently active first: every message to and from that agent in
+ * one long thread. Messages that don't say who they're with (from before agents had names)
+ * go to [defaultAgent], the first in the inbox's list, which is where the relay sends their
+ * replies too. Names match whatever the case; the spelling in [agents] wins.
+ */
+internal fun channels(messages: List<RelayMessage>, agents: List<String> = emptyList(), defaultAgent: String? = agents.firstOrNull()): List<Conversation> {
+    val byId = messages.associateBy { it.id }
+    fun canonical(name: String) = agents.firstOrNull { it.equals(name, ignoreCase = true) } ?: name
+    return messages.groupBy { m -> (agentOf(m, byId) ?: defaultAgent)?.let(::canonical) ?: "Agent" }
+        .map { (agent, ms) -> Conversation(channelId(agent), ms.sortedBy { it.receivedAt }, agent) }
+        .sortedByDescending { it.lastActivity }
+}
+
 /** Messages grouped by conversation, most recently active first. */
 internal fun conversations(messages: List<RelayMessage>): List<Conversation> =
     messages.groupBy { it.threadId }
@@ -121,6 +149,14 @@ data class Attachment(
     val isVoice: Boolean get() = type.startsWith("audio/")
 }
 
+/**
+ * A voice note sent lately that the inbox hasn't transcribed yet (issue #14). Older ones
+ * without text were from before transcripts, or the inbox has none for them.
+ */
+internal fun Attachment.awaitingTranscript(reply: Reply, now: Long = System.currentTimeMillis()): Boolean =
+    isVoice && reply.state == ReplyState.Sent && transcript == null && transcriptError == null &&
+        now - reply.at < 10 * 60_000
+
 @Serializable
 enum class ReplyState { Pending, Sent, Failed }
 
@@ -132,6 +168,33 @@ internal object Agents : JsonFileState<List<String>>(
 ) {
     suspend fun set(names: List<String>) = update { names }
 }
+
+/**
+ * Subjects you gave channels, by channel id. Kept on this phone only. A channel without one
+ * shows its latest topic ([autoSubject]).
+ */
+internal object Subjects : JsonFileState<Map<String, String>>(
+    fileName = "subjects.json",
+    serializer = MapSerializer(String.serializer(), String.serializer()),
+    empty = emptyMap(),
+) {
+    /** Blank clears it, back to the automatic subject. */
+    suspend fun rename(id: String, subject: String) = update {
+        val trimmed = subject.trim().take(80)
+        if (trimmed.isEmpty()) it - id else it + (id to trimmed)
+    }
+}
+
+/**
+ * A channel's subject when you haven't given it one: what it's about lately. The agent's
+ * latest headline (agents write short ones), or the title of the conversation you started
+ * if it hasn't answered yet.
+ */
+internal fun Conversation.autoSubject(): String =
+    messages.lastOrNull { !it.mine }?.headline?.takeIf { it.isNotBlank() }
+        ?: messages.lastOrNull()?.headline.orEmpty()
+
+internal fun Conversation.subject(subjects: Map<String, String>): String = subjects[id] ?: autoSubject()
 
 /** The conversation, newest first. Kept as long as the relay keeps it. */
 internal object RelayStore : JsonFileState<List<RelayMessage>>(
@@ -174,6 +237,11 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
         )
         add(message)
         return message
+    }
+
+    suspend fun markRead(ids: Set<String>) = update { list ->
+        if (list.none { it.id in ids && !it.read }) list
+        else list.map { if (it.id in ids && !it.read) it.copy(read = true) else it }
     }
 
     suspend fun markThreadRead(threadId: String) = update { list ->
