@@ -183,7 +183,14 @@ class ConversationScreen(
                     ToLine(conversation.agent, conversation.subject(subjects))
                     timeline(conversation).forEach { entry ->
                         when (entry) {
-                            is Entry.FromAgent -> AgentEntry(entry.message, canReply) { choice ->
+                            is Entry.FromAgent -> AgentEntry(
+                                entry.message,
+                                canReply,
+                                filesDir = lightContext.filesDir,
+                                onImage = { image ->
+                                    navigateTo(screenFactory = { ImageScreen(it, image, entry.message.headline) })
+                                },
+                            ) { choice ->
                                 viewModel.reply(lightContext, entry.message.id, choice = choice)
                             }
                             is Entry.FromYou -> YourEntry(entry.reply)
@@ -269,7 +276,13 @@ internal fun timeline(conversation: Conversation): List<Entry> =
 
 /** Left, like the other side in Messages: the date, then the message, then any choices. */
 @Composable
-private fun AgentEntry(message: RelayMessage, canReply: Boolean, onChoice: (String) -> Unit) {
+private fun AgentEntry(
+    message: RelayMessage,
+    canReply: Boolean,
+    filesDir: File,
+    onImage: (MessageImage) -> Unit,
+    onChoice: (String) -> Unit,
+) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 1.7f.gridUnitsAsDp())) {
         LightText(text = formatDateTime(message.receivedAt), variant = LightTextVariant.Detail, modifier = Modifier.fillMaxWidth())
         // Messages sets message text in Paragraph, not Copy.
@@ -281,6 +294,14 @@ private fun AgentEntry(message: RelayMessage, canReply: Boolean, onChoice: (Stri
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 0.25f.gridUnitsAsDp()),
+            )
+        }
+        message.image?.let { image ->
+            InlineImage(
+                image,
+                filesDir,
+                modifier = Modifier.padding(top = 0.5f.gridUnitsAsDp(), end = 1.67f.gridUnitsAsDp()),
+                onClick = { onImage(image) },
             )
         }
         if (message.needsAnswer) {

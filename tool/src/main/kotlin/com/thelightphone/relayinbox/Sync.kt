@@ -136,6 +136,7 @@ private suspend fun syncNow(filesDir: File): SyncOutcome {
             fetchMessages(url, keys, bearer)
             fetchReplies(url, bearer)
             fetchTranscripts(url, bearer)
+            fetchImages(filesDir, url, bearer)
             if (System.currentTimeMillis() - agentsFetched > AGENTS_EVERY_MS || Agents.state.value.isEmpty()) {
                 fetchAgents(url, bearer)
                 agentsFetched = System.currentTimeMillis()
