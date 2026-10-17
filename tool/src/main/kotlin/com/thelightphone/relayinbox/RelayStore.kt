@@ -30,6 +30,26 @@ data class RelayMessage(
     val receivedAt: Long,
     val read: Boolean = false,
     val replies: List<Reply> = emptyList(),
+    /** A picture the agent sent with it, shown under the text once downloaded (see Images.kt). */
+    val image: MessageImage? = null,
+)
+
+/**
+ * A picture on an agent's message, as the signed message describes it. The file comes from
+ * the inbox's `GET /images/<id>` and is kept only if it matches [sha256], so it is exactly
+ * what the relay signed.
+ */
+@Serializable
+data class MessageImage(
+    /** `i_` and 16 hex digits. */
+    val id: String,
+    /** `image/png` or `image/jpeg`. */
+    val type: String,
+    val bytes: Long,
+    val width: Int,
+    val height: Int,
+    /** Lower-case hex SHA-256 of the file. */
+    val sha256: String,
 )
 
 /** The conversation this message is part of: the first message's id. */
