@@ -152,7 +152,7 @@ class ConversationScreen(
                             val archived = c.isArchived(archive)
                             navigateTo(
                                 screenFactory = {
-                                    MenuScreen(it, c.agent ?: "Conversation", listOf(
+                                    ConversationMenuScreen(it, c.agent ?: "Conversation", c.id, listOf(
                                         MenuItem("rename", "Rename subject"),
                                         if (archived) MenuItem("restore", "Move to inbox") else MenuItem("archive", "Archive"),
                                     ))

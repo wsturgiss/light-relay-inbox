@@ -81,9 +81,12 @@ internal suspend fun fetchImages(filesDir: File, replyUrl: String, bearer: Strin
     ImageFiles.scan(filesDir)
     val messages = RelayStore.state.value
     val wanted = messages.mapNotNull { it.image }.filter { it.isValid() }
-    val missing = wanted.filter { !ImageFiles.has(it.id) && !ImageFiles.isUnavailable(it.id) }
-        .sortedByDescending { img -> messages.first { it.image == img }.receivedAt }
-        .take(IMAGES_PER_SYNC)
+    val missing = downloadOrder(
+        wanted.filter { !ImageFiles.has(it.id) && !ImageFiles.isUnavailable(it.id) }
+            .map { img -> img to messages.first { it.image == img }.receivedAt },
+        WantedImages.ids,
+        IMAGES_PER_SYNC,
+    )
     for (image in missing) {
         val data = try {
             getBytes(inboxRoute(replyUrl, "/images/${image.id}"), bearer)
@@ -117,6 +120,9 @@ internal suspend fun fetchImages(filesDir: File, replyUrl: String, bearer: Strin
         ImageFiles.removed(gone.map { it.name }.toSet())
         ImageBitmaps.forget(gone.map { it.name }.toSet())
     }
+    // Photos you sent go when their reply does.
+    val photos = messages.flatMap { m -> m.replies.flatMap { r -> r.attachments.map { "${it.id}.jpg" } } }.toSet()
+    photosDir(filesDir).listFiles()?.filter { it.name !in photos }?.forEach { it.delete() }
 }
 
 private class ImageRefused(val status: Int) : Exception("HTTP $status")
