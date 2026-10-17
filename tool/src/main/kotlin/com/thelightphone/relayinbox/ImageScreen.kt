@@ -1,6 +1,7 @@
 package com.thelightphone.relayinbox
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -67,6 +68,15 @@ private fun rememberImageBitmap(filesDir: File, image: MessageImage): Bitmap? {
     return bitmap
 }
 
+/** A photo you sent, decoded off the main thread; null if it isn't on the phone. */
+@Composable
+private fun rememberPhotoBitmap(filesDir: File, picture: MediaItem): Bitmap? {
+    val bitmap by produceState<Bitmap?>(initialValue = null, picture.key) {
+        value = withContext(Dispatchers.IO) { picture.localFile(filesDir)?.let { BitmapFactory.decodeFile(it.path) } }
+    }
+    return bitmap
+}
+
 /**
  * A picture under an agent's message: the full width, in a hairline frame, as tall as its
  * shape (a very tall one is cut at [INLINE_MAX_TALL] and shows its top). Until it's downloaded,
@@ -113,11 +123,15 @@ class ImageViewModel : LightViewModel<Unit>()
  * where you tap or back out. Press and hold to hide the top bar and the hint for the whole
  * screen; hold again, or tap once, to bring them back. Back still leaves.
  */
-class ImageScreen(
+class ImageScreen internal constructor(
     sealedActivity: SealedLightActivity,
-    private val image: MessageImage,
+    private val picture: MediaItem,
     private val title: String,
 ) : LightScreen<Unit, ImageViewModel>(sealedActivity) {
+
+    /** An agent's picture, from under its message. */
+    constructor(sealedActivity: SealedLightActivity, image: MessageImage, title: String) :
+        this(sealedActivity, MediaItem(image.id, 0, fromAgent = true, image = image, title = title), title)
 
     override val viewModelClass: Class<ImageViewModel>
         get() = ImageViewModel::class.java
@@ -127,7 +141,10 @@ class ImageScreen(
     @Composable
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
-        val bitmap = rememberImageBitmap(lightContext.filesDir, image)
+        // Which kind is fixed for the screen, so the composition stays the same shape.
+        val image = picture.image
+        val bitmap = if (image != null) rememberImageBitmap(lightContext.filesDir, image)
+        else rememberPhotoBitmap(lightContext.filesDir, picture)
         var barsHidden by remember { mutableStateOf(false) }
         LightTheme(colors = themeColors) {
             Column(

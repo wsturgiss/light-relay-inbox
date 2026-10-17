@@ -316,9 +316,19 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
         r.copy(attachments = r.attachments.map { if (it.id == attachmentId) it.copy(uploaded = true) else it })
     }
 
-    /** Sent: the inbox has the files, so this phone lets them go. */
+    /** Sent: the inbox has the files, so this phone lets them go, except photos, which Media keeps. */
     suspend fun replySent(replyId: String) = updateReply(replyId) { r ->
-        r.attachments.forEach { a -> a.path?.let { java.io.File(it).delete() } }
+        r.attachments.forEach { a ->
+            a.path?.let { java.io.File(it) }?.let { file ->
+                // attachments/<id>.jpg -> photos/<id>.jpg, next to it under filesDir.
+                val filesDir = file.parentFile?.parentFile
+                if (a.type.startsWith("image/") && filesDir != null && file.exists()) {
+                    if (!file.renameTo(sentPhotoFile(filesDir, a.id))) file.delete()
+                } else {
+                    file.delete()
+                }
+            }
+        }
         r.copy(state = ReplyState.Sent, attachments = r.attachments.map { it.copy(path = null) })
     }
 
