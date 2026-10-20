@@ -18,7 +18,6 @@ internal object PushCodec {
         val headline: String,
         val detail: String = "",
         val choices: List<String> = emptyList(),
-        val thread: String? = null,
         val from: String? = null,
         val image: MessageImage? = null,
         val options: List<ChoiceOption>? = null,
@@ -45,7 +44,6 @@ internal object PushCodec {
             headline = wire.headline,
             detail = wire.detail,
             choices = wire.choices,
-            thread = wire.thread,
             from = wire.from,
             // A picture described oddly is left off; the text still shows.
             image = wire.image?.takeIf { it.isValid() },
