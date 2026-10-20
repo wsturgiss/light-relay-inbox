@@ -38,9 +38,13 @@ internal fun scheduleSync(context: SealedLightContext) {
     LightWork.enqueuePeriodic(context, SYNC_JOB, 15.minutes)
 }
 
-/** How far through the relay's messages and the inbox's replies this phone has read. */
+/**
+ * How far through the relay's messages and the inbox's replies this phone has read.
+ * [refetched]: the relay's messages have been read once more from the start, so ones saved
+ * by a build from before `from` have their senders (see [withMessage]).
+ */
 @Serializable
-data class SyncState(val messages: Long = 0, val replies: Long = 0, val transcripts: Long = 0)
+data class SyncState(val messages: Long = 0, val replies: Long = 0, val transcripts: Long = 0, val refetched: Boolean = false)
 
 internal object SyncCursor : JsonFileState<SyncState>(
     fileName = "sync.json",
@@ -53,6 +57,8 @@ internal object SyncCursor : JsonFileState<SyncState>(
     suspend fun repliesUpTo(seq: Long) = update { it.copy(replies = maxOf(it.replies, seq)) }
 
     suspend fun transcriptsUpTo(seq: Long) = update { it.copy(transcripts = maxOf(it.transcripts, seq)) }
+
+    suspend fun markRefetched() = update { it.copy(refetched = true) }
 }
 
 @Serializable
@@ -187,8 +193,10 @@ internal class LiveRefresh(private val scope: CoroutineScope, private val filesD
 private const val PAGE = 100
 
 private suspend fun fetchMessages(replyUrl: String, keys: PairingKeys, bearer: String) {
+    // Not yet read again from the start: do that once, then carry on from the cursor.
+    var refetchedUpTo = if (SyncCursor.state.value.refetched) null else 0L
     while (true) {
-        val after = SyncCursor.state.value.messages
+        val after = refetchedUpTo ?: SyncCursor.state.value.messages
         val page = json.decodeFromString(
             MessagesPage.serializer(),
             get(inboxRoute(replyUrl, "/messages?after=$after&limit=$PAGE"), bearer),
@@ -206,8 +214,12 @@ private suspend fun fetchMessages(replyUrl: String, keys: PairingKeys, bearer: S
                 Log.i(TAG, "Fetched ${message.id}")
             }
             SyncCursor.messagesUpTo(fetched.seq)
+            if (refetchedUpTo != null) refetchedUpTo = fetched.seq
         }
-        if (page.size < PAGE) return
+        if (page.size < PAGE) {
+            if (refetchedUpTo != null) SyncCursor.markRefetched()
+            return
+        }
     }
 }
 

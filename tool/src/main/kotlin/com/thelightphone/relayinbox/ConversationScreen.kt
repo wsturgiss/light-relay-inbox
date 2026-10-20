@@ -49,8 +49,10 @@ class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
 
     override fun onAppPause() = refresh.stop()
 
+    /** Sends to [to]; [messageId] is only where it's kept here, and the question it answers if it's an answer. */
     fun reply(
         context: SealedLightContext,
+        to: String?,
         messageId: String,
         choice: String? = null,
         text: String? = null,
@@ -63,7 +65,7 @@ class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
             RelayStore.addReply(
                 messageId,
                 Reply(id = id, choice = choice, text = text, at = System.currentTimeMillis(), attachments = attachments,
-                    choiceIds = choiceIds, other = other),
+                    choiceIds = choiceIds, other = other, to = to),
             )
             scheduleReplySend(context)
         }
@@ -73,16 +75,16 @@ class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
         viewModelScope.launch { Subjects.rename(id, subject) }
     }
 
-    fun archive(threadId: String, then: () -> Unit) {
+    fun archive(channelId: String, then: () -> Unit) {
         viewModelScope.launch {
-            Archive.archive(threadId)
+            Archive.archive(channelId)
             then()
         }
     }
 
-    fun restore(threadId: String, then: () -> Unit) {
+    fun restore(channelId: String, then: () -> Unit) {
         viewModelScope.launch {
-            Archive.restore(threadId)
+            Archive.restore(channelId)
             then()
         }
     }
@@ -97,12 +99,12 @@ class ConversationViewModel(filesDir: File) : LightViewModel<Unit>() {
 
 /**
  * One channel, oldest first and opening on the latest: everything from one agent, with your
- * replies in between. A message still waiting on a choice keeps its choices; **Reply**
- * answers the latest message, which the relay hands to that agent.
+ * replies in between. A message still waiting on a choice keeps its choices. Whatever you
+ * write here goes to this channel's agent, named on the reply; there are no threads.
  */
 class ConversationScreen(
     sealedActivity: SealedLightActivity,
-    private val threadId: String,
+    private val channelId: String,
 ) : LightScreen<Unit, ConversationViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<ConversationViewModel>
@@ -118,7 +120,7 @@ class ConversationScreen(
         val archive by Archive.state.collectAsState()
         val agents by Agents.state.collectAsState()
         val subjects by Subjects.state.collectAsState()
-        val conversation = remember(messages, agents) { channels(messages, agents).firstOrNull { it.id == threadId } }
+        val conversation = remember(messages, agents) { channels(messages, agents).firstOrNull { it.id == channelId } }
         val scrollState = rememberScrollState()
         // Follow the bottom while the layout settles and as messages arrive, until you scroll up.
         var pinnedToEnd by remember { mutableStateOf(true) }
@@ -133,6 +135,8 @@ class ConversationScreen(
         }
 
         val canReply = keys != null && inboxUrl().isNotEmpty()
+        // Everything written here is for this channel's agent, whatever message it's kept under.
+        val to = conversation?.replyTo(agents)
         LightTheme(colors = themeColors) {
             Column(
                 modifier = Modifier
@@ -162,8 +166,8 @@ class ConversationScreen(
                                             resultCallback = { text -> if (text != null) viewModel.rename(c.id, text) },
                                         )
                                         // Archived: back to where you came from, which no longer lists it.
-                                        "archive" -> viewModel.archive(threadId) { goBack() }
-                                        "restore" -> viewModel.restore(threadId) { goBack() }
+                                        "archive" -> viewModel.archive(channelId) { goBack() }
+                                        "restore" -> viewModel.restore(channelId) { goBack() }
                                     }
                                 },
                             )
@@ -197,13 +201,13 @@ class ConversationScreen(
                                     navigateTo(
                                         screenFactory = { TextEditorScreen(it, EditorRequest(title = "Other", initialValue = "", initialCaps = true)) },
                                         resultCallback = { text ->
-                                            if (!text.isNullOrBlank()) viewModel.reply(lightContext, entry.message.id, text = text.trim(), other = true)
+                                            if (!text.isNullOrBlank()) viewModel.reply(lightContext, to, entry.message.id, text = text.trim(), other = true)
                                         },
                                     )
                                 },
                             ) { picked ->
                                 val send = {
-                                    viewModel.reply(lightContext, entry.message.id, choice = picked.joinToString(", ") { it.label },
+                                    viewModel.reply(lightContext, to, entry.message.id, choice = picked.joinToString(", ") { it.label },
                                         choiceIds = picked.map { it.id })
                                 }
                                 val risky = picked.filter { it.danger }
@@ -244,7 +248,7 @@ class ConversationScreen(
                                 navigateTo(
                                     screenFactory = { VoiceNoteScreen(it) },
                                     resultCallback = { note ->
-                                        if (note != null) viewModel.reply(lightContext, latest.id, attachments = listOf(note))
+                                        if (note != null) viewModel.reply(lightContext, to, latest.id, attachments = listOf(note))
                                     },
                                 )
                             })
@@ -254,7 +258,7 @@ class ConversationScreen(
                                 navigateTo(
                                     screenFactory = { PhotoScreen(it) },
                                     resultCallback = { photo ->
-                                        if (photo != null) viewModel.reply(lightContext, latest.id, attachments = listOf(photo))
+                                        if (photo != null) viewModel.reply(lightContext, to, latest.id, attachments = listOf(photo))
                                     },
                                 )
                             })
@@ -269,7 +273,7 @@ class ConversationScreen(
                                 navigateTo(
                                     screenFactory = { TextEditorScreen(it, EditorRequest(title = "Reply", initialValue = "", initialCaps = true)) },
                                     resultCallback = { text ->
-                                        if (text.isNotBlank()) viewModel.reply(lightContext, latest.id, text = text.trim())
+                                        if (text.isNotBlank()) viewModel.reply(lightContext, to, latest.id, text = text.trim())
                                     },
                                 )
                             })

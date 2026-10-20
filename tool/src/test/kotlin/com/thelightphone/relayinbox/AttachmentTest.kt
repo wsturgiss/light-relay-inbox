@@ -10,7 +10,7 @@ class AttachmentTest {
     @Test
     fun `a voice note comes back from the inbox's history`() {
         // GET /replies on the inbox, as light-relay writes it.
-        val page = """{"replies": [{"seq": 3, "id": "r_v1", "messageId": "m1", "thread": null, "title": null,
+        val page = """{"replies": [{"seq": 3, "id": "r_v1", "messageId": "m1",
             "choice": null, "text": null, "sentAt": "2026-10-13T12:54:29Z", "receivedAt": "2026-10-13T12:54:29Z",
             "attachments": [{"id": "a_1234567890abcdef", "type": "audio/mp4", "bytes": 48213}]}]}"""
         val replies = json.decodeFromString(RepliesPage.serializer(), page).replies
