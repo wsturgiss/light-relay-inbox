@@ -12,6 +12,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -36,9 +38,13 @@ internal fun scheduleSync(context: SealedLightContext) {
     LightWork.enqueuePeriodic(context, SYNC_JOB, 15.minutes)
 }
 
-/** How far through the relay's messages and the inbox's replies this phone has read. */
+/**
+ * How far through the relay's messages and the inbox's replies this phone has read.
+ * [refetched]: the relay's messages have been read once more from the start, so ones saved
+ * by a build from before `from` have their senders (see [withMessage]).
+ */
 @Serializable
-data class SyncState(val messages: Long = 0, val replies: Long = 0)
+data class SyncState(val messages: Long = 0, val replies: Long = 0, val transcripts: Long = 0, val refetched: Boolean = false)
 
 internal object SyncCursor : JsonFileState<SyncState>(
     fileName = "sync.json",
@@ -49,6 +55,10 @@ internal object SyncCursor : JsonFileState<SyncState>(
     suspend fun messagesUpTo(seq: Long) = update { it.copy(messages = maxOf(it.messages, seq)) }
 
     suspend fun repliesUpTo(seq: Long) = update { it.copy(replies = maxOf(it.replies, seq)) }
+
+    suspend fun transcriptsUpTo(seq: Long) = update { it.copy(transcripts = maxOf(it.transcripts, seq)) }
+
+    suspend fun markRefetched() = update { it.copy(refetched = true) }
 }
 
 @Serializable
@@ -59,6 +69,15 @@ internal data class MessagesPage(val messages: List<FetchedMessage> = emptyList(
 
 @Serializable
 internal data class RepliesPage(val replies: List<InboxReply> = emptyList())
+
+@Serializable
+internal data class AgentsPage(val agents: List<String> = emptyList())
+
+@Serializable
+internal data class FetchedTranscript(val seq: Long, val id: String, val text: String = "", val error: String? = null)
+
+@Serializable
+internal data class TranscriptsPage(val transcripts: List<FetchedTranscript> = emptyList())
 
 /** The inbox's other routes sit beside `/replies`, which is what the build is given. */
 internal fun inboxRoute(replyUrl: String, route: String): String =
@@ -82,8 +101,33 @@ val sync: LightJobHandler = { ctx, _ ->
 
 internal enum class SyncOutcome { Done, TryAgain, CantSync, NeedsHome }
 
-/** One fetch of messages and replies. The job runs it, and so does an open screen. */
-internal suspend fun syncOnce(filesDir: File): SyncOutcome {
+/** One sync at a time: the job, the inbox and an open conversation all ask, often at once. */
+private val syncing = Mutex()
+
+/** A sync this soon after the last one adds nothing, and each costs the inbox's per-minute allowance. */
+private const val MIN_GAP_MS = 10_000L
+
+/** The agents list rarely changes: fetched on the first sync and hourly after. */
+private const val AGENTS_EVERY_MS = 60 * 60_000L
+
+@Volatile
+private var lastSynced = 0L
+
+@Volatile
+private var agentsFetched = 0L
+
+/**
+ * One fetch of messages, replies and transcripts. The job runs it, and so does an open
+ * screen. Asked again while one is running, or within [MIN_GAP_MS] of the last, it does
+ * nothing: overlapping syncs used to spend the inbox's 20 requests a minute, and a reply
+ * sent then was refused and waited out a 30-second backoff.
+ */
+internal suspend fun syncOnce(filesDir: File): SyncOutcome = syncing.withLock {
+    if (System.currentTimeMillis() - lastSynced < MIN_GAP_MS) return@withLock SyncOutcome.Done
+    syncNow(filesDir).also { if (it == SyncOutcome.Done) lastSynced = System.currentTimeMillis() }
+}
+
+private suspend fun syncNow(filesDir: File): SyncOutcome {
     openStores(filesDir)
     val keys = Pairing.keys.value
     val url = inboxUrl()
@@ -97,6 +141,12 @@ internal suspend fun syncOnce(filesDir: File): SyncOutcome {
         withContext(Dispatchers.IO) {
             fetchMessages(url, keys, bearer)
             fetchReplies(url, bearer)
+            fetchTranscripts(url, bearer)
+            fetchImages(filesDir, url, bearer)
+            if (System.currentTimeMillis() - agentsFetched > AGENTS_EVERY_MS || Agents.state.value.isEmpty()) {
+                fetchAgents(url, bearer)
+                agentsFetched = System.currentTimeMillis()
+            }
         }
         SyncOutcome.Done
     } catch (e: IOException) {
@@ -112,7 +162,7 @@ internal suspend fun syncOnce(filesDir: File): SyncOutcome {
     }
 }
 
-/** How often an open screen checks in. Two small requests each time; the inbox allows 20 a minute. */
+/** How often an open screen checks in. Three small requests each time; the inbox allows 20 a minute. */
 private val LIVE_REFRESH = 20.seconds
 
 /**
@@ -143,8 +193,10 @@ internal class LiveRefresh(private val scope: CoroutineScope, private val filesD
 private const val PAGE = 100
 
 private suspend fun fetchMessages(replyUrl: String, keys: PairingKeys, bearer: String) {
+    // Not yet read again from the start: do that once, then carry on from the cursor.
+    var refetchedUpTo = if (SyncCursor.state.value.refetched) null else 0L
     while (true) {
-        val after = SyncCursor.state.value.messages
+        val after = refetchedUpTo ?: SyncCursor.state.value.messages
         val page = json.decodeFromString(
             MessagesPage.serializer(),
             get(inboxRoute(replyUrl, "/messages?after=$after&limit=$PAGE"), bearer),
@@ -162,8 +214,12 @@ private suspend fun fetchMessages(replyUrl: String, keys: PairingKeys, bearer: S
                 Log.i(TAG, "Fetched ${message.id}")
             }
             SyncCursor.messagesUpTo(fetched.seq)
+            if (refetchedUpTo != null) refetchedUpTo = fetched.seq
         }
-        if (page.size < PAGE) return
+        if (page.size < PAGE) {
+            if (refetchedUpTo != null) SyncCursor.markRefetched()
+            return
+        }
     }
 }
 
@@ -177,6 +233,34 @@ private suspend fun fetchReplies(replyUrl: String, token: String) {
         if (page.isEmpty()) return
         RelayStore.mergeReplies(page)
         SyncCursor.repliesUpTo(page.last().seq)
+        if (page.size < PAGE) return
+    }
+}
+
+/** Who a new conversation can go to. An inbox from before agents (404) leaves the list as it was. */
+private suspend fun fetchAgents(replyUrl: String, token: String) {
+    val body = try {
+        get(inboxRoute(replyUrl, "/agents"), token)
+    } catch (e: Refused) {
+        if (e.status == 404) return else throw e
+    }
+    Agents.set(json.decodeFromString(AgentsPage.serializer(), body).agents)
+}
+
+/** Voice notes' text, which the inbox adds a few seconds after the reply. */
+private suspend fun fetchTranscripts(replyUrl: String, token: String) {
+    while (true) {
+        val after = SyncCursor.state.value.transcripts
+        val body = try {
+            get(inboxRoute(replyUrl, "/transcripts?after=$after&limit=$PAGE"), token)
+        } catch (e: Refused) {
+            // An inbox from before transcripts.
+            if (e.status == 404) return else throw e
+        }
+        val page = json.decodeFromString(TranscriptsPage.serializer(), body).transcripts
+        if (page.isEmpty()) return
+        RelayStore.addTranscripts(page)
+        SyncCursor.transcriptsUpTo(page.last().seq)
         if (page.size < PAGE) return
     }
 }

@@ -7,6 +7,7 @@ import com.thelightphone.sdk.LightJobResult
 import com.thelightphone.sdk.LightWork
 import com.thelightphone.sdk.SealedLightContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -28,12 +29,13 @@ internal fun scheduleReplySend(context: SealedLightContext) {
 private data class ReplyBody(
     val id: String,
     val messageId: String?,
-    val thread: String?,
-    val title: String?,
     val choice: String?,
     val text: String?,
     val sentAt: String,
     val attachments: List<String>,
+    val to: String? = null,
+    val choiceIds: List<String>? = null,
+    val other: Boolean = false,
 )
 
 /**
@@ -67,7 +69,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                     continue@replies
                 }
                 val status = try {
-                    withContext(Dispatchers.IO) { upload(inboxRoute(url, "/attachments/${attachment.id}"), token, attachment.type, file) }
+                    soonAfter429 { withContext(Dispatchers.IO) { upload(inboxRoute(url, "/attachments/${attachment.id}"), token, attachment.type, file) } }
                 } catch (e: IOException) {
                     Log.w(TAG, "${attachment.id} not uploaded yet: $e")
                     retry = true
@@ -91,22 +93,9 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                     }
                 }
             }
-            val body = json.encodeToString(
-                ReplyBody.serializer(),
-                ReplyBody(
-                    id = reply.id,
-                    // Written in a conversation you started, before the agent answered.
-                    messageId = message.id.takeUnless { message.mine },
-                    thread = message.id.takeIf { message.mine },
-                    title = message.headline.takeIf { message.mine },
-                    choice = reply.choice,
-                    text = reply.text,
-                    sentAt = Instant.ofEpochMilli(reply.at).toString(),
-                    attachments = reply.attachments.map { it.id },
-                ),
-            )
+            val body = replyBody(message, reply)
             val status = try {
-                withContext(Dispatchers.IO) { post(url, token, body) }
+                soonAfter429 { withContext(Dispatchers.IO) { post(url, token, body) } }
             } catch (e: IOException) {
                 Log.w(TAG, "Reply ${reply.id} not sent yet: $e")
                 retry = true
@@ -129,6 +118,20 @@ val sendReplies: LightJobHandler = { ctx, _ ->
         }
         if (retry) LightJobResult.Retry else LightJobResult.Success()
     }
+}
+
+/**
+ * Asks again a few seconds after a 429, a couple of times, before the job gives up for now.
+ * Left to WorkManager, a reply refused by the inbox's rate limit waited 30 seconds.
+ */
+private suspend fun soonAfter429(request: suspend () -> Int): Int {
+    var status = request()
+    repeat(2) { attempt ->
+        if (status != 429) return status
+        delay(3_000L * (attempt + 1))
+        status = request()
+    }
+    return status
 }
 
 private fun upload(url: String, token: String, type: String, file: File): Int {
@@ -162,4 +165,25 @@ private fun post(url: String, token: String, body: String): Int {
     } finally {
         conn.disconnect()
     }
+}
+
+/** What [reply] posts: who it's for, and only for an answer, the question it answers. */
+internal fun replyBody(message: RelayMessage, reply: Reply): String {
+    // Queued before replies named their agent: the agent of what it's under.
+    val to = reply.to ?: agentOf(message)
+    return json.encodeToString(
+        ReplyBody.serializer(),
+        ReplyBody(
+            id = reply.id,
+            // The relay files a reply by `to` alone; the message only says which question it answers.
+            messageId = message.id.takeIf { !message.mine && (reply.answers || to == null) },
+            choice = reply.choice,
+            text = reply.text,
+            sentAt = Instant.ofEpochMilli(reply.at).toString(),
+            attachments = reply.attachments.map { it.id },
+            to = to,
+            choiceIds = reply.choiceIds,
+            other = reply.other,
+        ),
+    )
 }

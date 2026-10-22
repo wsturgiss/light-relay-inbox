@@ -22,8 +22,10 @@ import com.thelightphone.sdk.nfc.LightNfcTap
 import com.thelightphone.sdk.nfc.LightNfcUnavailableException
 import com.thelightphone.sdk.shared.LightServiceMethod
 import com.thelightphone.sdk.shared.asKotlinResult
+import com.thelightphone.sdk.ui.LightCapturedPhoto
 import com.thelightphone.sdk.ui.LightNfcTapReader
 import com.thelightphone.sdk.ui.LightNfcTapState
+import com.thelightphone.sdk.ui.LightPhotoCapture
 import com.thelightphone.sdk.ui.LightQrCodeScanner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
@@ -47,6 +49,35 @@ fun LightQrCodeScanner(
         onScanned = onScanned,
         onBack = onBack,
         modifier = modifier,
+        checkCameraPermission = {
+            checkPermission(Manifest.permission.CAMERA).asKotlinResult
+                .map { it.permissionResult == LightServiceMethod.GetPermission.Result.Granted }
+        },
+        launchCameraPermissionRequest = {
+            permissionLauncher?.launch()
+        }
+    )
+}
+
+/**
+ * Wrapper for the UI library's LightPhotoCapture that includes the client library's functions for
+ * checking and requesting the camera permission for the SDK server
+ */
+@Composable
+fun LightPhotoCapture(
+    onCaptured: (LightCapturedPhoto) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    title: String = "Take Photo",
+    maxLongEdgePx: Int? = null,
+) {
+    val permissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.CAMERA)
+    LightPhotoCapture(
+        title = title,
+        onCaptured = onCaptured,
+        onBack = onBack,
+        modifier = modifier,
+        maxLongEdgePx = maxLongEdgePx,
         checkCameraPermission = {
             checkPermission(Manifest.permission.CAMERA).asKotlinResult
                 .map { it.permissionResult == LightServiceMethod.GetPermission.Result.Granted }
