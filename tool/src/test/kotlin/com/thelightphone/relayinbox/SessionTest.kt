@@ -50,4 +50,15 @@ class SessionTest {
             renewalProof("t".repeat(43), 1_791_900_000, "ab".repeat(16)),
         )
     }
+
+    @Test
+    fun `a pending reply waits for home only when sessions are on and none is usable`() {
+        val now = 1_000_000_000L
+        val fresh = InboxSession(token = "s", expiresAt = now + 3_600_000, renewedAt = now)
+        val expiring = fresh.copy(expiresAt = now + 30_000)
+        assertEquals("waiting for home network", pendingStatus(waitingForHome(enabled = true, session = null, now = now)))
+        assertEquals("waiting for home network", pendingStatus(waitingForHome(enabled = true, session = expiring, now = now)))
+        assertEquals("sending", pendingStatus(waitingForHome(enabled = true, session = fresh, now = now)))
+        assertEquals("sending", pendingStatus(waitingForHome(enabled = false, session = null, now = now)))
+    }
 }

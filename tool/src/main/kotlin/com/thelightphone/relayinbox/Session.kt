@@ -47,7 +47,7 @@ internal object Session : JsonFileState<InboxSession?>(
     val enabled: Boolean get() = sessionUrl().isNotEmpty() && sessionPin().isNotEmpty()
 
     /** The session, unless it's gone or about to be. */
-    fun current(now: Long = System.currentTimeMillis()): InboxSession? = state.value?.takeIf { it.expiresAt > now + 60_000 }
+    fun current(now: Long = System.currentTimeMillis()): InboxSession? = state.value?.takeIf { it.usable(now) }
 
     /** Ask the LAN door for a fresh session if it's time. Quiet when it can't be reached: that's being away. */
     suspend fun renewIfDue(replyToken: String, now: Long = System.currentTimeMillis()) {
@@ -71,6 +71,16 @@ internal object Session : JsonFileState<InboxSession?>(
         update { null }
     }
 }
+
+/** Not gone or about to be: good for at least another minute. */
+internal fun InboxSession.usable(now: Long = System.currentTimeMillis()): Boolean = expiresAt > now + 60_000
+
+/** Sessions are on and none is usable: pending replies are held until the phone is home. */
+internal fun waitingForHome(
+    enabled: Boolean = Session.enabled,
+    session: InboxSession? = Session.state.value,
+    now: Long = System.currentTimeMillis(),
+): Boolean = enabled && session?.usable(now) != true
 
 internal fun sessionUrl(): String = BuildConfig.RELAY_SESSION_URL.trim().removeSuffix("/")
 

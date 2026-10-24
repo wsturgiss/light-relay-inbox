@@ -231,6 +231,8 @@ private fun ConversationRow(conversation: Conversation, subjects: Map<String, St
     val first = conversation.messages.first()
     val latest = conversation.latest
     val title = conversation.agent ?: first.headline
+    val session by Session.state.collectAsState()
+    val waiting = waitingForHome(session = session)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -266,11 +268,11 @@ private fun ConversationRow(conversation: Conversation, subjects: Map<String, St
                 conversation.needsAnswer -> "needs an answer"
                 // Yours and not answered yet: the summary already shows what you wrote.
                 latest.mine -> when (conversation.lastReply?.state) {
-                    ReplyState.Pending -> "sending"
+                    ReplyState.Pending -> pendingStatus(waiting)
                     ReplyState.Failed -> "not sent"
                     else -> "waiting for a reply"
                 }
-                else -> conversation.lastReply?.label()
+                else -> conversation.lastReply?.label(waiting)
             },
             conversation.messages.size.takeIf { it > 1 }?.let { "$it messages" },
         ).joinToString(" · ")

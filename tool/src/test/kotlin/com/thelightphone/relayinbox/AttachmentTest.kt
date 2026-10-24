@@ -39,7 +39,9 @@ class AttachmentTest {
         assertEquals("Photo", photo.label())
         val captioned = Reply(id = "r1", text = "Which one?", at = 1, state = ReplyState.Sent, attachments = listOf(photo))
         assertEquals("You: “Which one?”", captioned.label())
-        assertEquals("You: Photo · sending", Reply(id = "r2", at = 1, attachments = listOf(photo)).label())
+        val pending = Reply(id = "r2", at = 1, attachments = listOf(photo))
+        assertEquals("You: Photo · sending", pending.label())
+        assertEquals("You: Photo · waiting for home network", pending.label(waitingForHome = true))
     }
 
     @Test

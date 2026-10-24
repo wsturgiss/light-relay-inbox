@@ -55,13 +55,16 @@ internal fun formatTime(epochMillis: Long): String {
     }
 }
 
+/** How a pending reply is going: on its way, or held until the phone has a session from home. */
+internal fun pendingStatus(waitingForHome: Boolean): String = if (waitingForHome) "waiting for home network" else "sending"
+
 /** "You: Yes" for an inbox row, plus how it's going until it has reached the relay. */
-internal fun Reply.label(): String {
+internal fun Reply.label(waitingForHome: Boolean = false): String {
     val what = choice ?: text?.let { "“${it.take(40)}”" }
         ?: attachments.firstNotNullOfOrNull { it.transcript?.takeIf(String::isNotBlank) }?.let { "“${it.take(40)}”" }
         ?: attachments.joinToString { it.label() }
     return when (state) {
-        ReplyState.Pending -> "You: $what · sending"
+        ReplyState.Pending -> "You: $what · ${pendingStatus(waitingForHome)}"
         ReplyState.Sent -> "You: $what"
         ReplyState.Failed -> "You: $what · not sent"
     }

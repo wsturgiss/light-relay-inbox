@@ -405,8 +405,9 @@ private fun VoiceLabel(attachment: Attachment) {
 /** Right, like your side in Messages: the date flush right, the text indented under it. */
 @Composable
 private fun YourEntry(reply: Reply) {
+    val session by Session.state.collectAsState()
     val state = when (reply.state) {
-        ReplyState.Pending -> " · sending"
+        ReplyState.Pending -> " · ${pendingStatus(waitingForHome(session = session))}"
         ReplyState.Failed -> " · not sent"
         ReplyState.Sent -> ""
     }
