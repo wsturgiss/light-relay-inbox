@@ -29,8 +29,6 @@ internal fun scheduleReplySend(context: SealedLightContext) {
 private data class ReplyBody(
     val id: String,
     val messageId: String?,
-    val thread: String?,
-    val title: String?,
     val choice: String?,
     val text: String?,
     val sentAt: String,
@@ -95,23 +93,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                     }
                 }
             }
-            val body = json.encodeToString(
-                ReplyBody.serializer(),
-                ReplyBody(
-                    id = reply.id,
-                    // Written in a conversation you started, before the agent answered.
-                    messageId = message.id.takeUnless { message.mine },
-                    thread = message.id.takeIf { message.mine },
-                    title = message.headline.takeIf { message.mine },
-                    choice = reply.choice,
-                    text = reply.text,
-                    sentAt = Instant.ofEpochMilli(reply.at).toString(),
-                    attachments = reply.attachments.map { it.id },
-                    to = message.to.takeIf { message.mine },
-                    choiceIds = reply.choiceIds,
-                    other = reply.other,
-                ),
-            )
+            val body = replyBody(message, reply)
             val status = try {
                 soonAfter429 { withContext(Dispatchers.IO) { post(url, token, body) } }
             } catch (e: IOException) {
@@ -183,4 +165,25 @@ private fun post(url: String, token: String, body: String): Int {
     } finally {
         conn.disconnect()
     }
+}
+
+/** What [reply] posts: who it's for, and only for an answer, the question it answers. */
+internal fun replyBody(message: RelayMessage, reply: Reply): String {
+    // Queued before replies named their agent: the agent of what it's under.
+    val to = reply.to ?: agentOf(message)
+    return json.encodeToString(
+        ReplyBody.serializer(),
+        ReplyBody(
+            id = reply.id,
+            // The relay files a reply by `to` alone; the message only says which question it answers.
+            messageId = message.id.takeIf { !message.mine && (reply.answers || to == null) },
+            choice = reply.choice,
+            text = reply.text,
+            sentAt = Instant.ofEpochMilli(reply.at).toString(),
+            attachments = reply.attachments.map { it.id },
+            to = to,
+            choiceIds = reply.choiceIds,
+            other = reply.other,
+        ),
+    )
 }

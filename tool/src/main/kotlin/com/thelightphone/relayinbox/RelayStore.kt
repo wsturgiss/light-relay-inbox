@@ -12,15 +12,13 @@ data class RelayMessage(
     val headline: String,
     val detail: String = "",
     val choices: List<String> = emptyList(),
-    /** The first message of the conversation this continues; null when it starts one. */
-    val thread: String? = null,
     /**
-     * Started on this phone, not sent by the agent: the start of a conversation you began.
-     * Its id is the conversation's (`t_…`), [headline] is the title, and its replies are
-     * what you wrote before the agent answered.
+     * Written on this phone, not sent by the agent: what you wrote to an agent before it had
+     * sent you anything to keep it under, or your history after a reinstall. [headline] is your
+     * first line, and its replies are what you wrote.
      */
     val mine: Boolean = false,
-    /** For a conversation you started: the agent you picked under To, if the inbox offered any. */
+    /** On one of yours: the agent it's for, if the inbox offered any. */
     val to: String? = null,
     /** Which agent sent it, when the relay knows (the agent named itself with its token). */
     val from: String? = null,
@@ -87,17 +85,11 @@ data class MessageImage(
     val sha256: String,
 )
 
-/** The conversation this message is part of: the first message's id. */
-val RelayMessage.threadId: String get() = thread ?: id
-
 /** Waiting on you: it offers choices and you haven't answered. */
 val RelayMessage.needsAnswer: Boolean
     get() = choices.isNotEmpty() && answer == null
 
-/**
- * One conversation, oldest message first. A channel holds everything to and from one agent
- * ([agent]); a thread (from [conversations]) holds one exchange.
- */
+/** One agent's conversation ([agent]): everything to and from it, oldest message first. */
 data class Conversation(val id: String, val messages: List<RelayMessage>, val agent: String? = null) {
     val latest: RelayMessage get() = messages.last()
     val lastActivity: Long get() = messages.maxOf { m -> maxOf(m.receivedAt, m.replies.maxOfOrNull { it.at } ?: 0) }
@@ -143,34 +135,31 @@ internal object Archive : JsonFileState<Map<String, Long>>(
 internal fun Conversation.isArchived(archive: Map<String, Long>): Boolean =
     archive[id]?.let { it >= lastActivity } == true
 
-/** The agent a message is with: who sent it, else who the phone conversation it belongs to is for. */
-internal fun agentOf(message: RelayMessage, byId: Map<String, RelayMessage>): String? =
-    message.from
-        ?: message.to?.takeIf { message.mine }
-        ?: message.thread?.let { byId[it] }?.let { root -> root.to?.takeIf { root.mine } ?: root.from }
+/** The agent a message is with: who sent it, or for one of yours, who it's for. */
+internal fun agentOf(message: RelayMessage): String? =
+    message.from ?: message.to?.takeIf { message.mine }
 
 /** A channel's id: `@` and the agent's name. */
 internal fun channelId(agent: String): String = "@$agent"
 
 /**
- * One channel per agent, most recently active first: every message to and from that agent in
- * one long thread. Messages that don't say who they're with (from before agents had names)
- * go to [defaultAgent], the first in the inbox's list, which is where the relay sends their
- * replies too. Names match whatever the case; the spelling in [agents] wins.
+ * One channel per agent, most recently active first: every message to and from that agent.
+ * Messages that don't say who they're with (from before agents had names, or from an agent
+ * without one) go to [defaultAgent], the first in the inbox's list, as the relay files them.
+ * Names match whatever the case; the spelling in [agents] wins.
  */
 internal fun channels(messages: List<RelayMessage>, agents: List<String> = emptyList(), defaultAgent: String? = agents.firstOrNull()): List<Conversation> {
-    val byId = messages.associateBy { it.id }
     fun canonical(name: String) = agents.firstOrNull { it.equals(name, ignoreCase = true) } ?: name
-    return messages.groupBy { m -> (agentOf(m, byId) ?: defaultAgent)?.let(::canonical) ?: "Agent" }
+    return messages.groupBy { m -> (agentOf(m) ?: defaultAgent)?.let(::canonical) ?: "Agent" }
         .map { (agent, ms) -> Conversation(channelId(agent), ms.sortedBy { it.receivedAt }, agent) }
         .sortedByDescending { it.lastActivity }
 }
 
-/** Messages grouped by conversation, most recently active first. */
-internal fun conversations(messages: List<RelayMessage>): List<Conversation> =
-    messages.groupBy { it.threadId }
-        .map { (id, ms) -> Conversation(id, ms.sortedBy { it.receivedAt }) }
-        .sortedByDescending { it.lastActivity }
+/**
+ * Who a reply written in [this] channel is for: its agent. Null when the inbox names no
+ * agents, so the relay's own default takes it.
+ */
+internal fun Conversation.replyTo(agents: List<String>): String? = agent.takeIf { agents.isNotEmpty() }
 
 @Serializable
 data class Reply(
@@ -184,7 +173,12 @@ data class Reply(
     /** A typed answer to the question ("Other…"), in [text]. */
     val other: Boolean = false,
     val attachments: List<Attachment> = emptyList(),
-)
+    /** The agent whose conversation it was written in. Null from before replies named one. */
+    val to: String? = null,
+) {
+    /** Answers its message's question: the one reply that names the message to the relay. */
+    val answers: Boolean get() = choice != null || choiceIds != null || other
+}
 
 /**
  * A voice note or photo sent with a reply. The file waits in [path] until the reply is
@@ -261,20 +255,12 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
     serializer = ListSerializer(RelayMessage.serializer()),
     empty = emptyList(),
 ) {
-    private const val KEEP = 1000
-    private const val KEEP_DAYS = 90L
-
     /** Adds a pushed or fetched message. False if it was already here (pushed and fetched, or redelivered). */
     suspend fun add(message: RelayMessage): Boolean {
         var added = false
         update { list ->
-            if (list.any { it.id == message.id }) {
-                list
-            } else {
-                added = true
-                val cutoff = System.currentTimeMillis() - KEEP_DAYS * 86_400_000
-                (listOf(message) + list).filter { it.receivedAt >= cutoff }.sortedByDescending { it.receivedAt }.take(KEEP)
-            }
+            added = list.none { it.id == message.id }
+            withMessage(list, message)
         }
         return added
     }
@@ -282,7 +268,7 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
     /** See [withInboxReplies]. */
     suspend fun mergeReplies(fromInbox: List<InboxReply>) = update { withInboxReplies(it, fromInbox) }
 
-    /** Starts a conversation from the phone: [text]'s first line is the title. Returns its reply, queued to send. */
+    /** Writes to [to] from the inbox: [text]'s first line is the headline. Returns it, its reply queued to send. */
     suspend fun startConversation(text: String, to: String? = null, now: Long = System.currentTimeMillis()): RelayMessage {
         val (title, _) = splitTitle(text)
         val message = RelayMessage(
@@ -292,7 +278,7 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
             to = to,
             receivedAt = now,
             read = true,
-            replies = listOf(Reply(id = "r_" + randomHex(8), text = text, at = now)),
+            replies = listOf(Reply(id = "r_" + randomHex(8), text = text, at = now, to = to)),
         )
         add(message)
         return message
@@ -301,10 +287,6 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
     suspend fun markRead(ids: Set<String>) = update { list ->
         if (list.none { it.id in ids && !it.read }) list
         else list.map { if (it.id in ids && !it.read) it.copy(read = true) else it }
-    }
-
-    suspend fun markThreadRead(threadId: String) = update { list ->
-        list.map { if (it.threadId == threadId && !it.read) it.copy(read = true) else it }
     }
 
     suspend fun addReply(messageId: String, reply: Reply) =
@@ -356,37 +338,61 @@ internal object RelayStore : JsonFileState<List<RelayMessage>>(
         update { list -> list.map { if (it.id == id) transform(it) else it } }
 }
 
+private const val KEEP = 1000
+private const val KEEP_DAYS = 90L
+
+/**
+ * [list] with [message] in it, newest first, within the last [KEEP_DAYS] and [KEEP] long. One
+ * already here stays as it is, except that it takes the sender if it was saved without one: by
+ * a build from before `from`, whose copy otherwise sits in the default agent's channel.
+ */
+internal fun withMessage(list: List<RelayMessage>, message: RelayMessage, now: Long = System.currentTimeMillis()): List<RelayMessage> {
+    val known = list.firstOrNull { it.id == message.id }
+    if (known != null) {
+        if (known.from != null || message.from == null) return list
+        return list.map { if (it.id == message.id) it.copy(from = message.from) else it }
+    }
+    val cutoff = now - KEEP_DAYS * 86_400_000
+    return (listOf(message) + list).filter { it.receivedAt >= cutoff }.sortedByDescending { it.receivedAt }.take(KEEP)
+}
+
 /**
  * Replies as the inbox stored them. One already here was sent from this phone, and the
  * inbox having it means it's [ReplyState.Sent]. One that isn't is history from before a
- * reinstall: it goes back under its message, which then counts as read. Replies to a
+ * reinstall: an answer goes back under its question, and anything else you wrote under one
+ * of yours for the agent it named ([yoursId]). Either then counts as read. Answers to a
  * message this phone no longer has are dropped.
  */
 internal fun withInboxReplies(list: List<RelayMessage>, fromInbox: List<InboxReply>): List<RelayMessage> {
-    // A conversation you started is filed under its thread; everything else under its message.
-    val byMessage = fromInbox.groupBy { it.messageId ?: it.thread }
-    // Starts that this phone no longer has (a reinstall) come back as the conversation's root.
-    val restoredStarts = fromInbox
-        .filter { it.messageId == null && it.thread != null && it.title != null && list.none { m -> m.id == it.thread } }
-        .distinctBy { it.thread }
-        .map { RelayMessage(id = it.thread!!, headline = it.title!!, mine = true, to = it.to, receivedAt = it.sentAtMillis(), read = true) }
-    return (list + restoredStarts).map { m ->
-        val incoming = byMessage[m.id].orEmpty()
-        if (incoming.isEmpty()) return@map m
-        val stored = incoming.map { it.id }.toSet()
-        val known = m.replies.map { it.id }.toSet()
-        val updated = m.replies.map { if (it.id in stored && it.state != ReplyState.Sent) it.copy(state = ReplyState.Sent) else it }
-        val restored = incoming.filter { it.id !in known }.map {
+    val stored = fromInbox.map { it.id }.toSet()
+    val known = list.flatMap { m -> m.replies.map { it.id } }.toSet()
+    val ids = list.map { it.id }.toSet()
+    val history = fromInbox.filter { it.id !in known }.distinctBy { it.id }
+    val restoredUnder = history.filter { it.messageId != null }.groupBy { it.messageId!! } +
+        history.filter { it.messageId == null }.groupBy { yoursId(it.to) }
+    val holders = restoredUnder.filterKeys { it !in ids && it.startsWith(YOURS_PREFIX) }.map { (id, rs) ->
+        RelayMessage(id = id, headline = splitTitle(rs.first().text.orEmpty()).first, mine = true, to = rs.first().to,
+            receivedAt = rs.minOf { it.sentAtMillis() }, read = true)
+    }
+    return (list + holders).map { m ->
+        val restored = restoredUnder[m.id].orEmpty().map {
             Reply(id = it.id, choice = it.choice, text = it.text, at = it.sentAtMillis(), state = ReplyState.Sent,
-                choiceIds = it.choiceIds, other = it.other,
+                choiceIds = it.choiceIds, other = it.other, to = it.to,
                 attachments = it.attachments.map { a ->
                     Attachment(id = a.id, type = a.type, bytes = a.bytes, uploaded = true,
                         transcript = a.transcript, transcriptError = a.transcriptError)
                 })
         }
+        if (restored.isEmpty() && m.replies.none { it.id in stored && it.state != ReplyState.Sent }) return@map m
+        val updated = m.replies.map { if (it.id in stored && it.state != ReplyState.Sent) it.copy(state = ReplyState.Sent) else it }
         m.copy(read = m.read || restored.isNotEmpty(), replies = (updated + restored).sortedBy { it.at })
     }
 }
+
+private const val YOURS_PREFIX = "y_"
+
+/** Where your history for [to] goes back after a reinstall: one of yours per agent. */
+internal fun yoursId(to: String?): String = YOURS_PREFIX + to.orEmpty().lowercase()
 
 /**
  * Puts each transcript, or its error, on its voice note, wherever that is. The later of two
@@ -409,15 +415,13 @@ internal fun withTranscripts(list: List<RelayMessage>, transcripts: List<Fetched
 data class InboxReply(
     val seq: Long,
     val id: String,
+    /** Set on an answer to a question: the message it answers. */
     val messageId: String? = null,
-    /** Set, with [title], on what you wrote in a conversation you started. */
-    val thread: String? = null,
-    val title: String? = null,
     val choice: String? = null,
     val text: String? = null,
     val sentAt: String? = null,
     val receivedAt: String = "",
-    /** On a conversation you started: who it was for. */
+    /** The agent whose conversation it was written in. */
     val to: String? = null,
     val attachments: List<InboxAttachment> = emptyList(),
     val choiceIds: List<String>? = null,

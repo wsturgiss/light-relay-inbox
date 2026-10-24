@@ -63,16 +63,16 @@ class SyncTest {
     }
 
     @Test
-    fun `follow-ups group under the first message, busiest conversation first`() {
-        val muse = message("m1", 10, Reply(id = "r1", choice = "Got it", at = 12))
-        val followUp = message("m2", 20, Reply(id = "r2", choice = "Nice", at = 25)).copy(thread = "m1")
+    fun `an agent's messages share its channel, busiest channel first`() {
+        val muse = message("m1", 10, Reply(id = "r1", choice = "Got it", at = 12)).copy(from = "Jarvis")
+        val followUp = message("m2", 20, Reply(id = "r2", choice = "Nice", at = 25)).copy(from = "Jarvis")
         val other = message("m3", 15).copy(choices = listOf("Yes", "No"))
-        val threads = conversations(listOf(other, followUp, muse))
-        assertEquals(listOf("m1", "m3"), threads.map { it.id })
-        assertEquals(listOf("m1", "m2"), threads[0].messages.map { it.id })
-        assertEquals(25, threads[0].lastActivity)
-        assertEquals("r2", threads[0].lastReply?.id)
-        assertTrue(threads[1].needsAnswer)
+        val channels = channels(listOf(other, followUp, muse), listOf("Huginn", "Jarvis"))
+        assertEquals(listOf("@Jarvis", "@Huginn"), channels.map { it.id })
+        assertEquals(listOf("m1", "m2"), channels[0].messages.map { it.id })
+        assertEquals(25, channels[0].lastActivity)
+        assertEquals("r2", channels[0].lastReply?.id)
+        assertTrue(channels[1].needsAnswer)
     }
 
     @Test
@@ -83,33 +83,43 @@ class SyncTest {
     }
 
     @Test
-    fun `a conversation you started comes back after a reinstall, with the agent's answer under it`() {
-        val start = InboxReply(seq = 9, id = "r9", thread = "t_8c1f0a2b3d4e5f60", title = "Plan Saturday",
-            text = "Plan Saturday\nHike or the market?", sentAt = "2026-10-01T09:30:00Z", to = "Huginn")
-        val answer = message("m4", 1_790_847_100_000).copy(thread = "t_8c1f0a2b3d4e5f60", headline = "Hike")
-        val restored = withInboxReplies(listOf(answer), listOf(start))
-        val root = assertNotNull(restored.firstOrNull { it.id == "t_8c1f0a2b3d4e5f60" })
-        assertTrue(root.mine)
-        assertEquals("Plan Saturday", root.headline)
-        assertEquals("Huginn", root.to)
-        assertEquals(listOf("r9"), root.replies.map { it.id })
-        assertEquals(ReplyState.Sent, root.replies.single().state)
+    fun `what you wrote comes back after a reinstall, in the channel it was for`() {
+        val wrote = InboxReply(seq = 9, id = "r9", text = "Plan Saturday\nHike or the market?", sentAt = "2026-10-01T09:30:00Z", to = "Jarvis")
+        val more = InboxReply(seq = 10, id = "r10", text = "Or both", sentAt = "2026-10-01T09:31:00Z", to = "jarvis")
+        val answer = message("m4", 1_790_847_100_000).copy(from = "Jarvis", headline = "Hike")
+        val restored = withInboxReplies(listOf(answer), listOf(wrote, more))
+        val yours = assertNotNull(restored.firstOrNull { it.id == yoursId("Jarvis") })
+        assertTrue(yours.mine)
+        assertEquals("Plan Saturday", yours.headline)
+        assertEquals(listOf("r9", "r10"), yours.replies.map { it.id })
+        assertEquals(listOf(ReplyState.Sent, ReplyState.Sent), yours.replies.map { it.state })
 
-        val conversation = conversations(restored).single()
-        assertEquals(listOf("t_8c1f0a2b3d4e5f60", "m4"), conversation.messages.map { it.id })
+        val channel = channels(restored, listOf("Huginn", "Jarvis")).single()
+        assertEquals("Jarvis", channel.agent)
+        assertEquals(listOf(yoursId("Jarvis"), "m4"), channel.messages.map { it.id })
+        // Read again, nothing doubles up.
+        assertEquals(restored, withInboxReplies(restored, listOf(wrote, more)))
+    }
+
+    @Test
+    fun `a reply sent from here is marked sent wherever it's kept`() {
+        val pending = Reply(id = "r1", text = "Hi", at = 10, to = "Huginn")
+        val merged = withInboxReplies(listOf(message("m1", 1, pending)),
+            listOf(InboxReply(seq = 1, id = "r1", text = "Hi", sentAt = "2026-10-01T09:30:00Z", to = "Huginn")))
+        assertEquals(listOf(pending.copy(state = ReplyState.Sent)), merged.single().replies)
     }
 
     @Test
     fun `an archived conversation comes back when something new happens in it`() {
-        val quiet = conversations(listOf(message("m1", 10, Reply(id = "r1", choice = "Yes", at = 20)))).single()
-        assertTrue(quiet.isArchived(mapOf("m1" to 30)))
+        val quiet = channels(listOf(message("m1", 10, Reply(id = "r1", choice = "Yes", at = 20)))).single()
+        assertTrue(quiet.isArchived(mapOf(quiet.id to 30)))
         assertTrue(!quiet.isArchived(emptyMap()))
 
-        val busier = conversations(listOf(
+        val busier = channels(listOf(
             message("m1", 10, Reply(id = "r1", choice = "Yes", at = 20)),
-            message("m2", 40).copy(thread = "m1"),
+            message("m2", 40),
         )).single()
-        assertTrue(!busier.isArchived(mapOf("m1" to 30)))
+        assertTrue(!busier.isArchived(mapOf(busier.id to 30)))
     }
 
     @Test
