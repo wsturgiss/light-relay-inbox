@@ -91,11 +91,11 @@ internal fun inboxRoute(replyUrl: String, route: String): String =
 @LightJob("sync")
 val sync: LightJobHandler = { ctx, _ ->
     when (syncOnce(ctx.filesDir)) {
-        SyncOutcome.Done -> LightJobResult.Success()
+        SyncOutcome.Done -> LightJobResult.Success(outputFilePath = null, message = null)
         SyncOutcome.TryAgain -> LightJobResult.Retry
-        SyncOutcome.CantSync -> LightJobResult.Error()
+        SyncOutcome.CantSync -> LightJobResult.Error(reason = "can't sync")
         // Away from home without a session: the next periodic run tries the LAN again.
-        SyncOutcome.NeedsHome -> LightJobResult.Success()
+        SyncOutcome.NeedsHome -> LightJobResult.Success(outputFilePath = null, message = null)
     }
 }
 
