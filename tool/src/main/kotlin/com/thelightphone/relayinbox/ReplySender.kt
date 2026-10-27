@@ -53,7 +53,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
     val token = keys?.let(::inboxBearer)
     if (keys == null || url.isEmpty()) {
         Log.w(TAG, "Replies can't be sent: ${if (keys == null) "not paired" else "relay.inboxUrl not set"}")
-        LightJobResult.Error()
+        LightJobResult.Error(reason = if (keys == null) "not paired" else "relay.inboxUrl not set")
     } else if (token == null) {
         // Sessions are on and this phone has none: replies wait until it's home.
         Log.i(TAG, "Replies waiting for a session from the home network")
@@ -116,7 +116,7 @@ val sendReplies: LightJobHandler = { ctx, _ ->
                 }
             }
         }
-        if (retry) LightJobResult.Retry else LightJobResult.Success()
+        if (retry) LightJobResult.Retry else LightJobResult.Success(outputFilePath = null, message = null)
     }
 }
 
