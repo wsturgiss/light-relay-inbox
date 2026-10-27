@@ -1,0 +1,28 @@
+# Light SDK emulator tasks (docs/system_app/README.md). They wrap scripts/emulator.sh, which also runs without mise.
+[env]
+# AVD = "lp3"   # override the AVD name here or in the environment
+
+[tasks.emu]
+description = "Boot the AVD with a writable /system (required every boot) and wait for it"
+run = "scripts/emulator.sh boot"
+
+[tasks.lightos-setup]
+description = "One-time: build the LightOS emulator app and push it into /system/priv-app (needs sdk/emulator/keys/platform.jks)"
+run = "scripts/emulator.sh lightos"
+
+[tasks.lightos]
+description = "Rebuild and reinstall the LightOS emulator system app (keeps uid 1000)"
+run = "scripts/emulator.sh update"
+
+[tasks.tool]
+description = "Build Relay Inbox for the emulator's LightOS, install it (-r) and launch it"
+run = "scripts/emulator.sh tool"
+
+[tasks.shot]
+description = "Screenshot the emulator (arg: file.png)"
+run = "scripts/emulator.sh shot"
+
+[settings]
+# Only install what this repo pins; do not auto-install tools from parent directories
+task.run_auto_install = false
+exec_auto_install = false
